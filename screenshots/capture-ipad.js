@@ -36,7 +36,7 @@ async function capture() {
   await page.waitForTimeout(2500);
 
   // Screenshot the home feed
-  const homePath = path.join(__dirname, 'current-ipad-home.png');
+  const homePath = path.join(__dirname, 'playwright', 'current-ipad-home.png');
   await page.screenshot({ path: homePath, fullPage: false });
   console.log(`Home screenshot saved: ${homePath}`);
 
@@ -50,7 +50,7 @@ async function capture() {
     await channelAvatar.click();
     await page.waitForURL('**/channel/**', { timeout: 8000 });
     await page.waitForTimeout(2000);
-    const channelPath = path.join(__dirname, 'current-ipad-channel.png');
+    const channelPath = path.join(__dirname, 'playwright', 'current-ipad-channel.png');
     await page.screenshot({ path: channelPath, fullPage: false });
     console.log(`Channel screenshot saved: ${channelPath}`);
   } catch (err) {

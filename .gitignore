@@ -24,7 +24,6 @@ frontend/.vite/
 # Docker volumes / runtime
 *.log
 
-# Screenshots (optional — remove this line if you want them in git)
-screenshots/
-*.png
+# Playwright-generated screenshots (ephemeral, rebuilt on demand)
+screenshots/playwright/
 *.docx
