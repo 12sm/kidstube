@@ -1,5 +1,10 @@
 # KidsTube — Claude Code Instructions
 
+## Session Memory
+Project history and context live in `.claude/memory/` (tracked in git, travels with the repo).
+Read `.claude/memory/MEMORY.md` at the start of any session to get up to speed.
+Write new memories there — not to `~/.claude/projects/` — so all machines share the same context.
+
 ## Project Summary
 Parent-controlled YouTube PWA for kids (profiles: Weston and Emery, profile IDs 5 and 6).
 Videos are curated nightly via a batch pipeline — no real-time filtering.
