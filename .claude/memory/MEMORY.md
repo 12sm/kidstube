@@ -46,7 +46,7 @@ Nightly batch processing, no real-time filtering. UI styled to look like the You
 
 ## UX Polish (Mar 14 2026)
 See `project_ux_polish_session.md` for full details. Summary of what changed:
-- Home feed: single-column, edge-to-edge thumbnails, pill-shaped filter chips
+- Home feed: single-column on phone, 3-col on iPad (`lg:grid-cols-3`), edge-to-edge thumbnails, pill-shaped filter chips
 - VideoCard: no `rounded-xl` on thumbnail, added `px-3 pb-4` to info row
 - Watch page: restructured info section + added Like/Dislike/Share/Save action bar
 - Next: fix MiniPlayer header overlay on Watch page, add back channel avatar subscription row
