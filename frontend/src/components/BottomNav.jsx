@@ -5,7 +5,7 @@ import { ProfileContext } from '../App.jsx';
 const AVATAR_COLORS = ['#e05252', '#4e9de0', '#50c878', '#e0a035', '#9b59b6', '#e07c4e'];
 
 const HomeIcon = ({ active }) => (
-  <svg viewBox="0 0 24 24" className={`w-6 h-6 ${active ? 'fill-white' : 'fill-current text-yt-muted'}`}>
+  <svg viewBox="0 0 24 24" className={`w-6 h-6 lg:w-7 lg:h-7 ${active ? 'fill-white' : 'fill-current text-yt-muted'}`}>
     <path d={active
       ? 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z'
       : 'M12 5.69l5 4.5V18h-2v-6H9v6H7v-7.81l5-4.5M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z'
@@ -15,14 +15,14 @@ const HomeIcon = ({ active }) => (
 
 // YouTube Shorts "S" bolt logo
 const ShortsIcon = ({ active }) => (
-  <svg viewBox="0 0 24 24" className={`w-6 h-6 ${active ? 'fill-white' : 'fill-current text-yt-muted'}`}>
+  <svg viewBox="0 0 24 24" className={`w-6 h-6 lg:w-7 lg:h-7 ${active ? 'fill-white' : 'fill-current text-yt-muted'}`}>
     <path d="M17.77 10.32l-1.2-.5.43-.5c1.24-1.44 1.12-3.6-.26-4.88-1.38-1.29-3.55-1.24-4.89.12L8 9h3v10.56c0 .26.21.44.45.44.1 0 .2-.03.28-.1L17 15h-3l3.77-4.68z"/>
   </svg>
 );
 
 // YouTube Subscriptions icon (film ticket with play)
 const SubscriptionsIcon = ({ active }) => (
-  <svg viewBox="0 0 24 24" className={`w-6 h-6 ${active ? 'fill-white' : 'fill-current text-yt-muted'}`}>
+  <svg viewBox="0 0 24 24" className={`w-6 h-6 lg:w-7 lg:h-7 ${active ? 'fill-white' : 'fill-current text-yt-muted'}`}>
     {active
       ? <path d="M20 8H4V6h16v2zm-2-6H6v2h12V2zm4 10v8c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2zm-6 4l-6-3.27v6.53L16 16z"/>
       : <>
@@ -35,7 +35,7 @@ const SubscriptionsIcon = ({ active }) => (
 function YouAvatar({ active, initial, color }) {
   return (
     <div
-      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold transition-all"
+      className="w-6 h-6 lg:w-7 lg:h-7 rounded-full flex items-center justify-center text-white text-xs lg:text-sm font-bold transition-all"
       style={{
         backgroundColor: color,
         boxShadow: active ? `0 0 0 2px white` : 'none',
@@ -91,13 +91,13 @@ export default function BottomNav() {
           <button
             key={path}
             onClick={() => handleTab(path)}
-            className={`flex-1 flex flex-col items-center gap-1 py-3 transition-colors ${active ? 'text-white' : 'text-yt-muted'}`}
+            className={`flex-1 flex flex-col items-center gap-1 py-3 lg:py-4 transition-colors ${active ? 'text-white' : 'text-yt-muted'}`}
           >
             {type === 'home'          && <HomeIcon active={active} />}
             {type === 'shorts'        && <ShortsIcon active={active} />}
             {type === 'subscriptions' && <SubscriptionsIcon active={active} />}
             {type === 'you'           && <YouAvatar active={active} initial={avatarInitial} color={avatarColor} />}
-            <span className={`text-xs ${active ? 'font-medium' : ''}`}>{label}</span>
+            <span className={`text-xs lg:text-sm ${active ? 'font-medium' : ''}`}>{label}</span>
           </button>
         );
       })}

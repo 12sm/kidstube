@@ -78,8 +78,8 @@ export default function Channel() {
 
         {/* Channel info — skeleton while loading */}
         {initialLoad ? (
-          <div className="px-4 pb-4 flex items-start gap-4">
-            <div className="skeleton w-14 h-14 flex-shrink-0 mt-0.5" style={{ borderRadius: '50%' }} />
+          <div className="px-4 pb-4 lg:px-6 lg:pb-6 flex items-start gap-4">
+            <div className="skeleton w-14 h-14 lg:w-20 lg:h-20 flex-shrink-0 mt-0.5" style={{ borderRadius: '50%' }} />
             <div className="flex-1 min-w-0 space-y-2 pt-1">
               <div className="skeleton h-4 w-40 rounded" />
               <div className="skeleton h-3 w-28 rounded" />
@@ -87,13 +87,13 @@ export default function Channel() {
             </div>
           </div>
         ) : channelInfo ? (
-          <div className="px-4 pb-4 flex items-start gap-4">
+          <div className="px-4 pb-4 lg:px-6 lg:pb-6 flex items-start gap-4">
             {channelInfo.thumbnail_url && (
               <img src={channelInfo.thumbnail_url} alt={channelInfo.channel_name}
-                className="w-14 h-14 rounded-full flex-shrink-0 object-cover mt-0.5" />
+                className="w-14 h-14 lg:w-20 lg:h-20 rounded-full flex-shrink-0 object-cover mt-0.5" />
             )}
             <div className="flex-1 min-w-0">
-              <h1 className="text-yt-text font-bold text-lg leading-tight">{channelInfo.channel_name}</h1>
+              <h1 className="text-yt-text font-bold text-lg lg:text-2xl leading-tight">{channelInfo.channel_name}</h1>
               {(channelInfo.custom_url || channelInfo.subscriber_count) && (
                 <p className="text-yt-muted text-xs mt-0.5">
                   {channelInfo.custom_url && <span>{channelInfo.custom_url}</span>}

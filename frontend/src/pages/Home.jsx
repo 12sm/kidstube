@@ -217,7 +217,7 @@ export default function Home() {
       {/* ── Sticky header ── */}
       <div className="sticky top-0 z-10 bg-yt-bg/95 backdrop-blur-sm" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         {/* Top bar */}
-        <div className="px-4 py-2.5 flex items-center justify-between">
+        <div className="px-4 py-2.5 lg:py-3 flex items-center justify-between">
           {searchOpen ? (
             <div className="flex items-center gap-2 w-full">
               <button onClick={closeSearch} className="text-yt-muted hover:text-yt-text transition-colors flex-shrink-0">
@@ -241,20 +241,20 @@ export default function Home() {
             <>
               {/* Logo — icon only, no text */}
               <div className="flex items-center">
-                <svg viewBox="0 0 28 20" className="h-5 w-auto" xmlns="http://www.w3.org/2000/svg">
+                <svg viewBox="0 0 28 20" className="h-5 lg:h-6 w-auto" xmlns="http://www.w3.org/2000/svg">
                   <path fill="#FF0000" d="M27.97 3.45s-.27-1.9-1.1-2.74C25.82.61 24.64.61 24.1.54 20.17-.02 14 0 14 0S7.83-.02 3.9.54C3.36.61 2.18.61 1.13 1.71.3 2.55.03 4.45.03 4.45S-.24 6.65-.24 8.85v2.05c0 2.2.27 4.4.27 4.4s.27 1.9 1.1 2.74c1.05 1.1 2.43 1.07 3.04 1.18C6.17 19.4 14 19.5 14 19.5s6.17-.1 10.1-.63c.54-.07 1.72-.07 2.77-1.17.83-.84 1.1-2.74 1.1-2.74s.27-2.2.27-4.4V7.85c0-2.2-.27-4.4-.27-4.4zM11.12 13.5V5.88l7.46 3.82-7.46 3.8z"/>
                 </svg>
-                <span className="ml-1.5 text-yt-text font-bold text-sm tracking-tight">YouTube</span>
+                <span className="ml-1.5 text-yt-text font-bold text-sm lg:text-base tracking-tight">YouTube</span>
               </div>
 
               {/* Right actions */}
               <div className="flex items-center gap-3">
                 <button onClick={openSearch} className="text-yt-muted hover:text-yt-text transition-colors" aria-label="Search">
-                  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  <svg viewBox="0 0 24 24" className="w-6 h-6 lg:w-7 lg:h-7 fill-current"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                 </button>
                 <button onClick={() => { clearProfile(); navigate('/'); }} title={`Switch profile (${profileName})`}>
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ring-2 ring-transparent hover:ring-white/30 transition-all"
+                    className="w-8 h-8 lg:w-9 lg:h-9 rounded-full flex items-center justify-center text-white text-sm lg:text-base font-bold ring-2 ring-transparent hover:ring-white/30 transition-all"
                     style={{ backgroundColor: avatarColor }}
                   >
                     {profileName?.charAt(0)?.toUpperCase() || '?'}
@@ -272,7 +272,7 @@ export default function Home() {
               <button
                 key={cat.id}
                 onClick={() => selectCategory(cat.id)}
-                className={`flex-shrink-0 px-3 py-1 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
+                className={`flex-shrink-0 px-3 py-1 lg:px-4 lg:py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
                   activeCategory === cat.id
                     ? 'bg-yt-text text-yt-bg'
                     : 'bg-yt-card text-yt-text hover:bg-yt-hover'
@@ -289,7 +289,7 @@ export default function Home() {
 
       {/* Video grid */}
       <div className="pt-2 pb-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 md:px-4 md:pt-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 lg:gap-4 md:px-4 md:pt-2">
           {initialLoad && Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={`sk-${i}`} />)}
           {!initialLoad && displayVideos.map((video, i) => (
             <VideoCard
@@ -303,7 +303,7 @@ export default function Home() {
 
         <div ref={loaderRef} className="py-6 text-center text-yt-muted text-sm">
           {!initialLoad && loading && !searchQuery && activeCategory === 'all' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 md:px-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 lg:gap-4 md:px-4">
               {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`sk-more-${i}`} />)}
             </div>
           )}
