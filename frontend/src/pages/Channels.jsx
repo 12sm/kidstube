@@ -95,7 +95,7 @@ export default function Channels() {
 
       {/* ── Header (all breakpoints) ── */}
       <div
-        className="sticky top-0 z-20 bg-yt-bg/95 backdrop-blur-sm border-b border-yt-border"
+        className="sticky top-0 z-20 bg-yt-bg/95 backdrop-blur-sm"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="px-4 py-2.5 lg:py-3 flex items-center justify-between">
@@ -198,7 +198,6 @@ export default function Channels() {
                   ))
               }
             </div>
-            <div className="border-b border-yt-border" />
           </div>
 
           {/* ── iPad: "Most relevant" horizontal shelf ── */}

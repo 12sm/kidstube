@@ -161,7 +161,6 @@ export default function Library() {
         </div>
       </div>
 
-      <div className="border-b border-yt-border mb-5" />
 
       {/* ── Continue Watching ── */}
       {(loading || continueWatching.length > 0) && (
@@ -186,7 +185,6 @@ export default function Library() {
         )}
       </div>
 
-      <div className="border-b border-yt-border mb-2" />
 
       {/* ── Menu rows ── */}
       <MenuRow
