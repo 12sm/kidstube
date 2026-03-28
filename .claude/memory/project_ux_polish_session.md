@@ -17,7 +17,8 @@ All three files edited and rebuilt into Docker:
 **`frontend/src/pages/Home.jsx`**
 - Filter chips: `rounded-lg` → `rounded-full` (pill shape matching YouTube)
 - Grid container: removed `px-4` side padding so thumbnails go edge-to-edge
-- Grid: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` → `grid-cols-1` (single column always)
+- Grid: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` → `grid-cols-1` (single column always on phone)
+  - Note: Ubuntu PR later added `md:grid-cols-2 lg:grid-cols-3` back for iPad — current state is single-col on phone, 3-col on iPad/desktop
 
 **`frontend/src/components/VideoCard.jsx`** (full card mode only)
 - Thumbnail: removed `rounded-xl` so thumbnails are flush edge-to-edge like YouTube
