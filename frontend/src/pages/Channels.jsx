@@ -126,7 +126,7 @@ export default function Channels() {
 
         {/* ── iPad: left sidebar ── */}
         <div
-          className="hidden lg:flex lg:flex-col lg:w-56 lg:shrink-0 lg:border-r lg:border-yt-border lg:sticky lg:overflow-y-auto"
+          className="hidden lg:flex lg:flex-col lg:w-56 lg:shrink-0 lg:sticky lg:overflow-y-auto"
           style={{ top: HEADER_H, height: `calc(100vh - ${HEADER_H}px)` }}
         >
           <div className="px-2 py-3">
@@ -207,7 +207,7 @@ export default function Channels() {
             {loadingVideos ? (
               <div className="flex gap-4 overflow-hidden pb-3">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="flex-shrink-0 w-72">
+                  <div key={i} className="flex-shrink-0 w-[375px]">
                     <div className="w-full aspect-video skeleton rounded-xl" />
                     <div className="flex gap-3 mt-2">
                       <div className="w-9 h-9 rounded-full skeleton flex-shrink-0" />
@@ -222,13 +222,12 @@ export default function Channels() {
             ) : shelfVideos.length > 0 ? (
               <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-3">
                 {shelfVideos.map(video => (
-                  <div key={video.video_id} className="flex-shrink-0 w-72">
+                  <div key={video.video_id} className="flex-shrink-0 w-[375px]">
                     <VideoCard video={video} disablePreview />
                   </div>
                 ))}
               </div>
             ) : null}
-            <div className="border-b border-yt-border mt-1" />
           </div>
 
           {/* ── Video grid ── */}
