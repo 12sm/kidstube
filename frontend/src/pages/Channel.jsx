@@ -64,7 +64,7 @@ export default function Channel() {
   return (
     <div className="min-h-screen bg-yt-bg pb-20">
       {/* Header */}
-      <div className="bg-yt-bg border-b border-yt-border">
+      <div className="bg-yt-bg">
         {/* Back button row */}
         <div className="px-4 pb-2" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}>
           <button

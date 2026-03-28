@@ -284,7 +284,6 @@ export default function Home() {
           </div>
         )}
 
-        <div className="border-b border-yt-border" />
       </div>
 
       {/* Video grid */}

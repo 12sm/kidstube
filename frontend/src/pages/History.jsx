@@ -202,7 +202,6 @@ export default function History() {
           </div>
         </div>
 
-        <div className="border-b border-yt-border" />
       </div>
 
       {/* Content */}
