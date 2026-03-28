@@ -26,7 +26,7 @@ function VideoShelf({ videos, onVideoClick }) {
           <button
             key={video.video_id}
             onClick={() => onVideoClick(video.video_id)}
-            className="flex-shrink-0 w-44 text-left"
+            className="flex-shrink-0 w-44 lg:w-64 text-left"
           >
             <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-yt-card">
               {video.thumbnail_url && (
@@ -87,7 +87,7 @@ function SkeletonShelf() {
   return (
     <div className="flex gap-3 overflow-x-auto scrollbar-hide px-4 pb-1">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="flex-shrink-0 w-44">
+        <div key={i} className="flex-shrink-0 w-44 lg:w-64">
           <div className="skeleton w-full aspect-video rounded-lg" />
           <div className="skeleton h-3 w-full mt-2 rounded" />
           <div className="skeleton h-3 w-2/3 mt-1.5 rounded" />
