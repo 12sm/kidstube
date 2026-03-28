@@ -67,3 +67,10 @@ See `project_ux_polish_session.md` for full details. Summary of what changed:
 
 ## Infrastructure Note (Mar 2026)
 Project moved from Mac local dev to Ubuntu dev machine. Repo is now in git.
+
+## Claude Install — Ubuntu Dev Server
+- `claude` not in PATH via SSH (fixed in a prior session — needs a fresh login shell to take effect)
+- Plugin gaps vs Mac: missing `commit-commands`, `context7`; has `code-review` and `superpowers` that Mac doesn't
+- Mac (v2.1.86) plugins: `frontend-design`, `playwright`, `commit-commands`, `context7`
+- Ubuntu plugins: `frontend-design`, `playwright`, `code-review`, `superpowers`
+- Goal: sync both machines to have all 6 plugins
