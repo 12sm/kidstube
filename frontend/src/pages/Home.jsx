@@ -289,7 +289,7 @@ export default function Home() {
 
       {/* Video grid */}
       <div className="pt-2 pb-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 md:gap-x-4 md:px-4 md:pt-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 md:px-4 md:pt-2">
           {initialLoad && Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={`sk-${i}`} />)}
           {!initialLoad && displayVideos.map((video, i) => (
             <VideoCard
@@ -303,7 +303,7 @@ export default function Home() {
 
         <div ref={loaderRef} className="py-6 text-center text-yt-muted text-sm">
           {!initialLoad && loading && !searchQuery && activeCategory === 'all' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 md:gap-x-4 md:px-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 md:px-4">
               {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`sk-more-${i}`} />)}
             </div>
           )}
