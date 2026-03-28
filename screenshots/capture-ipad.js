@@ -57,6 +57,14 @@ async function capture() {
     console.log('Could not navigate to channel:', err.message);
   }
 
+  // Subscriptions / Channels page
+  console.log('Navigating to Channels...');
+  await page.goto('http://localhost:3000/channels', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+  const channelsPath = path.join(__dirname, 'playwright', 'current-ipad-channels.png');
+  await page.screenshot({ path: channelsPath, fullPage: false });
+  console.log(`Channels screenshot saved: ${channelsPath}`);
+
   // Library / You page
   console.log('Navigating to Library...');
   await page.goto('http://localhost:3000/library', { waitUntil: 'networkidle' });
