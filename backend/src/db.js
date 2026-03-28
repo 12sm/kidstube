@@ -1,0 +1,528 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+const fs = require('fs');
+
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'kidstube.db');
+
+// Ensure data directory exists
+const dataDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+let db;
+
+function getDb() {
+  if (!db) {
+    db = new Database(DB_PATH);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+  }
+  return db;
+}
+
+function migrate() {
+  const db = getDb();
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS profiles (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      name                TEXT NOT NULL,
+      google_access_token TEXT,
+      google_refresh_token TEXT,
+      created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS channels (
+      channel_id    TEXT PRIMARY KEY,
+      profile_id    INTEGER NOT NULL REFERENCES profiles(id),
+      channel_name  TEXT,
+      thumbnail_url TEXT,
+      whitelisted   BOOLEAN DEFAULT 1,
+      last_synced   DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS videos (
+      video_id         TEXT PRIMARY KEY,
+      channel_id       TEXT REFERENCES channels(channel_id),
+      channel_name     TEXT,
+      channel_thumbnail TEXT,
+      title            TEXT,
+      description      TEXT,
+      thumbnail_url    TEXT,
+      transcript       TEXT,
+      duration_seconds INTEGER,
+      published_at     DATETIME,
+      status           TEXT DEFAULT 'pending',
+      rejection_reason TEXT,
+      is_recommended   BOOLEAN DEFAULT 0,
+      source_video_id  TEXT,
+      processed_at     DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS filter_rules (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id INTEGER REFERENCES profiles(id),
+      rule_type  TEXT NOT NULL,
+      value      TEXT NOT NULL,
+      scope      TEXT DEFAULT 'all',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS cron_runs (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+      finished_at      DATETIME,
+      videos_found     INTEGER DEFAULT 0,
+      videos_approved  INTEGER DEFAULT 0,
+      videos_rejected  INTEGER DEFAULT 0,
+      error_message    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS watch_history (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id       INTEGER NOT NULL REFERENCES profiles(id),
+      video_id         TEXT NOT NULL,
+      progress_seconds INTEGER DEFAULT 0,
+      duration_seconds INTEGER DEFAULT 0,
+      watched_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(profile_id, video_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS view_count_local (
+      video_id TEXT PRIMARY KEY,
+      views    INTEGER DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
+    CREATE INDEX IF NOT EXISTS idx_videos_channel ON videos(channel_id);
+    CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published_at);
+    CREATE INDEX IF NOT EXISTS idx_videos_recommended ON videos(is_recommended, source_video_id);
+    CREATE INDEX IF NOT EXISTS idx_channels_profile ON channels(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_rules_profile ON filter_rules(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_watch_history_profile ON watch_history(profile_id, watched_at DESC);
+  `);
+
+  // Fix videos.channel_id FK — channel_id is no longer a unique key in channels after composite-key migration
+  const videosDef = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='videos'").get();
+  if (videosDef && videosDef.sql.includes('REFERENCES channels(channel_id)')) {
+    db.exec(`
+      CREATE TABLE videos_new (
+        video_id         TEXT PRIMARY KEY,
+        channel_id       TEXT,
+        channel_name     TEXT,
+        channel_thumbnail TEXT,
+        title            TEXT,
+        description      TEXT,
+        thumbnail_url    TEXT,
+        transcript       TEXT,
+        duration_seconds INTEGER,
+        published_at     DATETIME,
+        status           TEXT DEFAULT 'pending',
+        rejection_reason TEXT,
+        is_recommended   BOOLEAN DEFAULT 0,
+        source_video_id  TEXT,
+        processed_at     DATETIME
+      );
+      INSERT OR IGNORE INTO videos_new SELECT * FROM videos;
+      DROP TABLE videos;
+      ALTER TABLE videos_new RENAME TO videos;
+      CREATE INDEX IF NOT EXISTS idx_videos_status      ON videos(status);
+      CREATE INDEX IF NOT EXISTS idx_videos_channel     ON videos(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_videos_published   ON videos(published_at);
+      CREATE INDEX IF NOT EXISTS idx_videos_recommended ON videos(is_recommended, source_video_id);
+    `);
+    console.log('Videos table: removed broken channel_id FK constraint');
+  }
+
+  // Migrate: add view_count to videos
+  const hasViewCount = db.prepare("SELECT 1 FROM pragma_table_info('videos') WHERE name='view_count'").get();
+  if (!hasViewCount) {
+    db.exec('ALTER TABLE videos ADD COLUMN view_count INTEGER');
+    console.log('Videos table: added view_count column');
+  }
+
+  // Migrate: add enrichment columns to channels
+  const hasDescription = db.prepare("SELECT 1 FROM pragma_table_info('channels') WHERE name='description'").get();
+  if (!hasDescription) {
+    db.exec(`
+      ALTER TABLE channels ADD COLUMN description TEXT;
+      ALTER TABLE channels ADD COLUMN subscriber_count INTEGER;
+      ALTER TABLE channels ADD COLUMN custom_url TEXT;
+    `);
+    console.log('Channels table: added enrichment columns');
+  }
+
+  // Migrate channels table to support the same channel across multiple profiles
+  const hasCompositeKey = db.prepare("SELECT 1 FROM pragma_table_info('channels') WHERE name='id'").get();
+  if (!hasCompositeKey) {
+    db.exec(`
+      CREATE TABLE channels_new (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_id    TEXT NOT NULL,
+        profile_id    INTEGER NOT NULL REFERENCES profiles(id),
+        channel_name  TEXT,
+        thumbnail_url TEXT,
+        whitelisted   BOOLEAN DEFAULT 1,
+        last_synced   DATETIME,
+        UNIQUE(channel_id, profile_id)
+      );
+      INSERT OR IGNORE INTO channels_new (channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced)
+        SELECT channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced FROM channels;
+      DROP TABLE channels;
+      ALTER TABLE channels_new RENAME TO channels;
+      CREATE INDEX IF NOT EXISTS idx_channels_profile ON channels(profile_id);
+    `);
+    console.log('Channels table migrated to composite (channel_id, profile_id) key');
+  }
+
+  console.log('Database migrated successfully');
+}
+
+// --- Profile queries ---
+function createProfile(name) {
+  return getDb().prepare(
+    'INSERT INTO profiles (name) VALUES (?) RETURNING *'
+  ).get(name);
+}
+
+function getProfiles() {
+  return getDb().prepare('SELECT * FROM profiles ORDER BY id').all();
+}
+
+function getProfile(id) {
+  return getDb().prepare('SELECT * FROM profiles WHERE id = ?').get(id);
+}
+
+function updateProfileTokens(id, accessToken, refreshToken) {
+  getDb().prepare(
+    'UPDATE profiles SET google_access_token = ?, google_refresh_token = ? WHERE id = ?'
+  ).run(accessToken, refreshToken, id);
+}
+
+// --- Channel queries ---
+function upsertChannel(channel) {
+  return getDb().prepare(`
+    INSERT INTO channels (channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced)
+    VALUES (@channel_id, @profile_id, @channel_name, @thumbnail_url, @whitelisted, CURRENT_TIMESTAMP)
+    ON CONFLICT(channel_id, profile_id) DO UPDATE SET
+      channel_name  = excluded.channel_name,
+      thumbnail_url = excluded.thumbnail_url,
+      last_synced   = CURRENT_TIMESTAMP
+  `).run(channel);
+}
+
+function getChannelsForProfile(profileId) {
+  return getDb().prepare(
+    'SELECT * FROM channels WHERE profile_id = ? ORDER BY channel_name'
+  ).all(profileId);
+}
+
+function getWhitelistedChannels(profileId) {
+  return getDb().prepare(
+    'SELECT * FROM channels WHERE profile_id = ? AND whitelisted = 1 ORDER BY channel_name'
+  ).all(profileId);
+}
+
+function getAllChannels() {
+  return getDb().prepare('SELECT * FROM channels ORDER BY channel_name').all();
+}
+
+function updateChannelEnrichment(channelId, data) {
+  getDb().prepare(`
+    UPDATE channels SET
+      description      = ?,
+      subscriber_count = ?,
+      custom_url       = ?
+    WHERE channel_id = ?
+  `).run(data.description || null, data.subscriber_count || null, data.custom_url || null, channelId);
+}
+
+function updateChannelWhitelist(channelId, profileId, whitelisted) {
+  getDb().prepare(
+    'UPDATE channels SET whitelisted = ? WHERE channel_id = ? AND profile_id = ?'
+  ).run(whitelisted ? 1 : 0, channelId, profileId);
+}
+
+// --- Video queries ---
+function videoExists(videoId) {
+  return !!getDb().prepare('SELECT 1 FROM videos WHERE video_id = ?').get(videoId);
+}
+
+function insertVideo(video) {
+  getDb().prepare(`
+    INSERT INTO videos
+      (video_id, channel_id, channel_name, channel_thumbnail, title, description,
+       thumbnail_url, transcript, duration_seconds, published_at,
+       status, is_recommended, source_video_id, view_count)
+    VALUES
+      (@video_id, @channel_id, @channel_name, @channel_thumbnail, @title, @description,
+       @thumbnail_url, @transcript, @duration_seconds, @published_at,
+       @status, @is_recommended, @source_video_id, @view_count)
+    ON CONFLICT(video_id) DO UPDATE SET
+      title            = COALESCE(excluded.title, title),
+      description      = COALESCE(excluded.description, description),
+      thumbnail_url    = COALESCE(excluded.thumbnail_url, thumbnail_url),
+      transcript       = COALESCE(excluded.transcript, transcript),
+      duration_seconds = COALESCE(excluded.duration_seconds, duration_seconds),
+      published_at     = COALESCE(excluded.published_at, published_at),
+      channel_name     = COALESCE(excluded.channel_name, channel_name),
+      channel_thumbnail = COALESCE(excluded.channel_thumbnail, channel_thumbnail),
+      view_count       = COALESCE(excluded.view_count, view_count)
+  `).run(video);
+}
+
+function updateVideoStatus(videoId, status, rejectionReason = null) {
+  getDb().prepare(
+    'UPDATE videos SET status = ?, rejection_reason = ?, processed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
+  ).run(status, rejectionReason, videoId);
+}
+
+function getApprovedFeed(profileId, page = 0, limit = 20) {
+  // Get all whitelisted channel IDs for this profile
+  const channels = getWhitelistedChannels(profileId);
+  if (channels.length === 0) return [];
+
+  const channelIds = channels.map(c => c.channel_id);
+  const placeholders = channelIds.map(() => '?').join(',');
+  const offset = page * limit;
+
+  return getDb().prepare(`
+    SELECT v.*, c.thumbnail_url as channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    WHERE v.channel_id IN (${placeholders})
+      AND v.status = 'approved'
+      AND v.video_id NOT IN (
+        SELECT value FROM filter_rules
+        WHERE rule_type = 'video_block'
+          AND (profile_id = ? OR profile_id IS NULL)
+      )
+    ORDER BY v.published_at DESC
+    LIMIT ? OFFSET ?
+  `).all([...channelIds, profileId, limit, offset]);
+}
+
+function blockVideo(profileId, videoId) {
+  getDb().prepare(
+    `INSERT OR IGNORE INTO filter_rules (profile_id, rule_type, value, scope)
+     VALUES (?, 'video_block', ?, 'profile')`
+  ).run(profileId, videoId);
+}
+
+function removeFromHistory(profileId, videoId) {
+  getDb().prepare(
+    'DELETE FROM watch_history WHERE profile_id = ? AND video_id = ?'
+  ).run(profileId, videoId);
+}
+
+function getApprovedVideosByChannel(channelId, page = 0, limit = 20) {
+  const offset = page * limit;
+  return getDb().prepare(`
+    SELECT v.*, c.thumbnail_url as channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    WHERE v.channel_id = ? AND v.status = 'approved'
+    ORDER BY v.published_at DESC
+    LIMIT ? OFFSET ?
+  `).all(channelId, limit, offset);
+}
+
+function getRelatedVideos(videoId) {
+  // First try source-based relations
+  const sourced = getDb().prepare(`
+    SELECT v.*, c.thumbnail_url as channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    WHERE v.source_video_id = ? AND v.status = 'approved'
+    ORDER BY v.published_at DESC
+    LIMIT 15
+  `).all(videoId);
+  if (sourced.length > 0) return sourced;
+
+  // Fall back: other approved videos from the same channel
+  const row = getDb().prepare('SELECT channel_id FROM videos WHERE video_id = ?').get(videoId);
+  if (!row) return [];
+  return getDb().prepare(`
+    SELECT v.*, c.thumbnail_url as channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    WHERE v.channel_id = ? AND v.video_id != ? AND v.status = 'approved'
+    ORDER BY v.published_at DESC
+    LIMIT 15
+  `).all(row.channel_id, videoId);
+}
+
+function getVideoById(videoId) {
+  return getDb().prepare(`
+    SELECT v.*, c.thumbnail_url as channel_thumbnail_img, c.channel_name as channel_display_name
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url, channel_name FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    WHERE v.video_id = ?
+  `).get(videoId);
+}
+
+function getPendingVideos() {
+  return getDb().prepare(
+    "SELECT * FROM videos WHERE status = 'pending' ORDER BY published_at DESC"
+  ).all();
+}
+
+function getRejectedVideos(limit = 50) {
+  return getDb().prepare(`
+    SELECT v.*, c.channel_name as ch_name
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, channel_name FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    WHERE v.status = 'rejected'
+    ORDER BY v.processed_at DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+function getApprovedVideosForRelated(profileId, limit = 50) {
+  const channels = getWhitelistedChannels(profileId);
+  if (channels.length === 0) return [];
+  const channelIds = channels.map(c => c.channel_id);
+  const placeholders = channelIds.map(() => '?').join(',');
+
+  return getDb().prepare(`
+    SELECT video_id, channel_id, title
+    FROM videos
+    WHERE channel_id IN (${placeholders})
+      AND status = 'approved'
+      AND is_recommended = 0
+    ORDER BY processed_at DESC
+    LIMIT ?
+  `).all([...channelIds, limit]);
+}
+
+// --- Watch history queries ---
+function upsertWatchHistory(profileId, videoId, progressSeconds, durationSeconds) {
+  getDb().prepare(`
+    INSERT INTO watch_history (profile_id, video_id, progress_seconds, duration_seconds, watched_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(profile_id, video_id) DO UPDATE SET
+      progress_seconds = excluded.progress_seconds,
+      duration_seconds = excluded.duration_seconds,
+      watched_at       = CURRENT_TIMESTAMP
+  `).run(profileId, videoId, progressSeconds, durationSeconds);
+}
+
+function getWatchHistory(profileId, limit = 50) {
+  return getDb().prepare(`
+    SELECT wh.video_id, wh.progress_seconds, wh.duration_seconds, wh.watched_at,
+           v.title, v.thumbnail_url, v.channel_name, v.channel_id, v.channel_thumbnail
+    FROM watch_history wh
+    JOIN videos v ON wh.video_id = v.video_id
+    WHERE wh.profile_id = ?
+    ORDER BY wh.watched_at DESC
+    LIMIT ?
+  `).all(profileId, limit);
+}
+
+function getWatchHistoryMap(profileId, videoIds) {
+  if (!videoIds || videoIds.length === 0) return {};
+  const placeholders = videoIds.map(() => '?').join(',');
+  const rows = getDb().prepare(`
+    SELECT video_id, progress_seconds, duration_seconds
+    FROM watch_history
+    WHERE profile_id = ? AND video_id IN (${placeholders})
+  `).all(profileId, ...videoIds);
+  const map = {};
+  for (const r of rows) map[r.video_id] = r;
+  return map;
+}
+
+// --- Filter rule queries ---
+function getFilterRules(profileId = null) {
+  if (profileId !== null) {
+    return getDb().prepare(
+      'SELECT * FROM filter_rules WHERE profile_id IS NULL OR profile_id = ? ORDER BY created_at'
+    ).all(profileId);
+  }
+  return getDb().prepare('SELECT * FROM filter_rules ORDER BY created_at').all();
+}
+
+function addFilterRule(rule) {
+  return getDb().prepare(
+    'INSERT INTO filter_rules (profile_id, rule_type, value, scope) VALUES (?, ?, ?, ?) RETURNING *'
+  ).get(rule.profile_id || null, rule.rule_type, rule.value, rule.scope || 'all');
+}
+
+function deleteFilterRule(id) {
+  getDb().prepare('DELETE FROM filter_rules WHERE id = ?').run(id);
+}
+
+// --- Cron run queries ---
+function createCronRun() {
+  return getDb().prepare(
+    'INSERT INTO cron_runs (started_at) VALUES (CURRENT_TIMESTAMP) RETURNING id'
+  ).get().id;
+}
+
+function finishCronRun(id, stats) {
+  getDb().prepare(`
+    UPDATE cron_runs SET
+      finished_at     = CURRENT_TIMESTAMP,
+      videos_found    = ?,
+      videos_approved = ?,
+      videos_rejected = ?,
+      error_message   = ?
+    WHERE id = ?
+  `).run(stats.found, stats.approved, stats.rejected, stats.error || null, id);
+}
+
+function getLastCronRun() {
+  return getDb().prepare(
+    'SELECT * FROM cron_runs ORDER BY started_at DESC LIMIT 1'
+  ).get();
+}
+
+function getStats() {
+  const db = getDb();
+  const last = getLastCronRun();
+  const total = db.prepare("SELECT COUNT(*) as count FROM videos WHERE status = 'approved'").get();
+  return {
+    last_run: last?.finished_at || last?.started_at || null,
+    last_approved: last?.videos_approved ?? null,
+    last_rejected: last?.videos_rejected ?? null,
+    total_videos: total?.count ?? 0
+  };
+}
+
+module.exports = {
+  getDb,
+  migrate,
+  createProfile,
+  getProfiles,
+  getProfile,
+  updateProfileTokens,
+  upsertChannel,
+  getChannelsForProfile,
+  getWhitelistedChannels,
+  getAllChannels,
+  updateChannelEnrichment,
+  updateChannelWhitelist,
+  videoExists,
+  insertVideo,
+  updateVideoStatus,
+  getApprovedFeed,
+  getApprovedVideosByChannel,
+  getRelatedVideos,
+  getVideoById,
+  getPendingVideos,
+  getRejectedVideos,
+  getApprovedVideosForRelated,
+  upsertWatchHistory,
+  getWatchHistory,
+  blockVideo,
+  removeFromHistory,
+  getWatchHistoryMap,
+  getFilterRules,
+  addFilterRule,
+  deleteFilterRule,
+  createCronRun,
+  finishCronRun,
+  getLastCronRun,
+  getStats
+};
