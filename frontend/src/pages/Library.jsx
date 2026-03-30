@@ -26,7 +26,7 @@ function VideoShelf({ videos, onVideoClick }) {
           <button
             key={video.video_id}
             onClick={() => onVideoClick(video.video_id)}
-            className="flex-shrink-0 w-44 lg:w-64 text-left"
+            className="flex-shrink-0 w-44 lg:w-[360px] text-left"
           >
             <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-yt-card">
               {video.thumbnail_url && (
@@ -43,8 +43,8 @@ function VideoShelf({ videos, onVideoClick }) {
                 </div>
               )}
             </div>
-            <p className="text-yt-text text-xs font-medium mt-1.5 line-clamp-2 leading-snug">{video.title}</p>
-            <p className="text-yt-muted text-xs mt-0.5 line-clamp-1">{video.channel_name}</p>
+            <p className="text-yt-text text-xs lg:text-sm font-medium mt-1.5 line-clamp-2 leading-snug">{video.title}</p>
+            <p className="text-yt-muted text-xs lg:text-sm mt-0.5 line-clamp-1">{video.channel_name}</p>
           </button>
         );
       })}
@@ -87,7 +87,7 @@ function SkeletonShelf() {
   return (
     <div className="flex gap-3 overflow-x-auto scrollbar-hide px-4 pb-1">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="flex-shrink-0 w-44 lg:w-64">
+        <div key={i} className="flex-shrink-0 w-44 lg:w-[360px]">
           <div className="skeleton w-full aspect-video rounded-lg" />
           <div className="skeleton h-3 w-full mt-2 rounded" />
           <div className="skeleton h-3 w-2/3 mt-1.5 rounded" />
@@ -136,13 +136,13 @@ export default function Library() {
       >
         <div className="flex items-center gap-4 mb-5">
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0"
+            className="w-16 h-16 lg:w-24 lg:h-24 rounded-full flex items-center justify-center text-white text-2xl lg:text-4xl font-bold flex-shrink-0"
             style={{ backgroundColor: avatarColor }}
           >
             {avatarInitial}
           </div>
           <div>
-            <h1 className="text-yt-text font-bold text-xl leading-tight">{profileName || 'Profile'}</h1>
+            <h1 className="text-yt-text font-bold text-xl lg:text-3xl leading-tight">{profileName || 'Profile'}</h1>
             <p className="text-yt-muted text-sm mt-0.5">YouTube Profile</p>
           </div>
         </div>

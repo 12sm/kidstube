@@ -5,6 +5,10 @@ Project history and context live in `.claude/memory/` (tracked in git, travels w
 Read `.claude/memory/MEMORY.md` at the start of any session to get up to speed.
 Write new memories there — not to `~/.claude/projects/` — so all machines share the same context.
 
+## Autonomous Work Backlog
+`BACKLOG.md` (repo root) — tasks approved for overnight Claude Code sessions. Read it at the start
+of any session to see what's queued. Overnight sessions pick the top TODO, implement it, open a PR.
+
 ## Project Summary
 Parent-controlled YouTube PWA for kids (profiles: Child1 and Child2, profile IDs 5 and 6).
 Videos are curated nightly via a batch pipeline — no real-time filtering.

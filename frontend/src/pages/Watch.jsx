@@ -26,7 +26,7 @@ function formatDuration(secs) {
 export default function Watch() {
   const { videoId }  = useParams();
   const { profileId } = useContext(ProfileContext);
-  const { openVideo, setNextVideo } = usePlayerContext();
+  const { openVideo, setNextVideo, fullscreen } = usePlayerContext();
   const navigate      = useNavigate();
   const [videoMeta, setVideoMeta] = useState(null);
   const [related,   setRelated]   = useState([]);
@@ -96,6 +96,11 @@ export default function Watch() {
         const cur = data.info.currentTime;
         const dur = data.info.duration;
         if (cur > 0) progressRef.current = { current: Math.floor(cur), duration: Math.floor(dur || 0) };
+        // Show our end-screen 20s before video ends to block YouTube's end-card overlays
+        if (cur > 0 && dur > 30) {
+          if (dur - cur <= 20) setVideoEnded(true);
+          else setVideoEnded(false);
+        }
       }
       if (data?.event === 'onStateChange' && data?.info === 0) {
         setVideoEnded(true);
@@ -117,10 +122,10 @@ export default function Watch() {
     /* On mobile: full-height flex column so the content below the video
        lives in its own scroll container and can never scroll behind the
        fixed MiniPlayer.  On desktop: revert to normal block layout. */
-    <div className="bg-yt-bg flex flex-col h-dvh lg:block lg:h-auto lg:min-h-screen" style={{ paddingTop: 59 }}>
-      <div className="flex flex-col flex-1 overflow-hidden lg:overflow-visible lg:max-w-screen-xl lg:mx-auto lg:flex lg:gap-6 lg:p-6">
+    <div className="bg-yt-bg flex flex-col h-dvh pt-[59px] lg:pt-0">
+      <div className="flex flex-col flex-1 overflow-hidden lg:flex-row">
 
-        <div className="flex flex-col flex-1 overflow-hidden lg:flex-1 lg:overflow-visible min-w-0">
+        <div className={`flex flex-col flex-1 overflow-hidden lg:flex-shrink-0 min-w-0 ${fullscreen ? 'lg:w-full' : 'lg:w-[68%]'}`}>
 
           {/* Video spacer — MiniPlayer overlays this area in full mode.
               flex-shrink-0 keeps it from being squeezed by the scroll container.
@@ -159,13 +164,13 @@ export default function Watch() {
           {/* Scrollable content below the video (mobile).
               On desktop this is just a normal block. */}
           <div
-            className="flex-1 overflow-y-auto lg:overflow-visible"
+            className="flex-1 overflow-y-auto"
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
 
           {/* Video info */}
           {videoMeta && (
-            <div className="px-4 lg:px-0 pt-3 pb-2">
+            <div className="px-4 pt-3 pb-2">
               {/* Title */}
               <h1 className="text-yt-text font-semibold text-base leading-snug mb-1">{videoMeta.title}</h1>
 
@@ -290,13 +295,13 @@ export default function Watch() {
           </div>{/* end scroll container */}
         </div>
 
-        {/* Up Next — desktop sidebar */}
-        {related.length > 0 && (
-          <div className="hidden lg:block w-80 flex-shrink-0 pt-0">
+        {/* Up Next — iPad/desktop sidebar (hidden in fullscreen) */}
+        {!fullscreen && related.length > 0 && (
+          <div className="hidden lg:flex lg:flex-col lg:w-[32%] lg:flex-shrink-0 lg:overflow-y-auto lg:px-4 lg:py-4">
             <h2 className="text-yt-muted text-xs font-semibold uppercase tracking-wider mb-3">Up Next</h2>
-            <div className="space-y-2">
+            <div className="space-y-4">
               {related.map(video => (
-                <VideoCard key={video.video_id} video={video} compact />
+                <VideoCard key={video.video_id} video={video} stacked />
               ))}
             </div>
           </div>

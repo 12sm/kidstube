@@ -73,6 +73,23 @@ async function capture() {
   await page.screenshot({ path: libraryPath, fullPage: false });
   console.log(`Library screenshot saved: ${libraryPath}`);
 
+  // Watch page
+  console.log('Navigating to a watch page...');
+  try {
+    const feedRes = await page.goto('http://localhost:3000/api/feed/5?limit=1', { waitUntil: 'networkidle' });
+    const feedData = await feedRes.json();
+    const vid = feedData.videos?.[0]?.video_id;
+    if (vid) {
+      await page.goto(`http://localhost:3000/watch/${vid}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(2500);
+      const watchPath = path.join(__dirname, 'playwright', 'current-ipad-watch.png');
+      await page.screenshot({ path: watchPath, fullPage: false });
+      console.log(`Watch screenshot saved: ${watchPath}`);
+    }
+  } catch (err) {
+    console.log('Could not capture watch page:', err.message);
+  }
+
   await browser.close();
   console.log('Done.');
 }
