@@ -4,8 +4,10 @@ import { usePlayerContext } from '../contexts/PlayerContext.jsx';
 
 const MINI_W  = 192;
 const MINI_H  = Math.round(MINI_W * 9 / 16); // 108
-const BOTTOM_NAV_H = 68; // nav content height (safeBottom handles home indicator)
+const BOTTOM_NAV_H = 68;
 const AUTOPLAY_SECS = 5;
+const CONTROLS_HIDE_MS = 3500;
+const END_CARD_BUFFER_SECS = 20; // show our end screen this many seconds before video ends
 
 function readSafeArea(prop) {
   const el = document.createElement('div');
@@ -14,6 +16,16 @@ function readSafeArea(prop) {
   const val = parseInt(getComputedStyle(el).paddingTop) || 0;
   document.body.removeChild(el);
   return val;
+}
+
+function fmt(secs) {
+  if (!secs && secs !== 0) return '0:00';
+  const s = Math.floor(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  return `${m}:${String(ss).padStart(2, '0')}`;
 }
 
 function CountdownRing({ seconds, total }) {
@@ -35,17 +47,14 @@ function CountdownRing({ seconds, total }) {
 }
 
 export default function MiniPlayer() {
-  const { videoId, minimized, nextVideo, minimize, expand, close, openVideo } = usePlayerContext();
+  const { videoId, minimized, nextVideo, minimize, expand, close, openVideo, fullscreen, enterFullscreen, exitFullscreen } = usePlayerContext();
   const navigate  = useNavigate();
   const location  = useLocation();
 
-  // safeTop: clamp to ≥44 so buttons clear any notch/Dynamic Island even if
-  // env() resolves late or to 0 (e.g. Safari browser mode vs PWA standalone).
-  const [safeTop]    = useState(59);   // iPhone Dynamic Island / notch floor
-  const [safeBottom] = useState(34);   // iPhone home indicator floor
+  const [safeTop]    = useState(59);
+  const [safeBottom] = useState(34);
   const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [countdown, setCountdown]   = useState(null);
-  const [showOverlay, setShowOverlay] = useState(true);
 
   const countdownRef  = useRef(null);
   const iframeRef     = useRef(null);
@@ -55,13 +64,72 @@ export default function MiniPlayer() {
   const didMinimize   = useRef(false);
   const swipeDelta    = useRef(0);
 
-  const [muted, setMuted]           = useState(true);
-  const [playing, setPlaying]       = useState(true);
-  const playingRef                  = useRef(true); // always current, safe in closures
-  const [landscape, setLandscape]   = useState(() => window.innerWidth > window.innerHeight);
+  const [muted, setMuted]         = useState(false);
+  const [playing, setPlaying]     = useState(false);
+  const playingRef                = useRef(false);
+  const [landscape, setLandscape] = useState(() => window.innerWidth > window.innerHeight);
 
-  // Reset muted state whenever a new video loads
-  useEffect(() => { setMuted(true); }, [videoId]);
+  // Custom controls state
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration]       = useState(0);
+  const [dragTime, setDragTime]       = useState(null); // seconds while dragging seek bar
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimerRef = useRef(null);
+
+  // Seek bar ref for custom touch-based scrubbing
+  const seekBarRef = useRef(null);
+  const [isSeeking, setIsSeeking] = useState(false);
+
+  // Settings panel
+  const [showSettings, setShowSettings]     = useState(false);
+  const [playbackSpeed, setPlaybackSpeed]   = useState(1);
+  const [playbackQuality, setPlaybackQuality] = useState('auto');
+
+  const resetControlsTimer = () => {
+    setShowControls(true);
+    clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), CONTROLS_HIDE_MS);
+  };
+
+  // Reset state when video changes, then register for infoDelivery
+  useEffect(() => {
+    setMuted(false);
+    setPlaying(false);
+    playingRef.current = false;
+    setCurrentTime(0);
+    setDuration(0);
+    setDragTime(null);
+    setShowControls(true);
+
+    // Register for infoDelivery events once the iframe has initialised
+    const listenTimer = setTimeout(() => {
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: 'listening', id: 1 }),
+        'https://www.youtube.com'
+      );
+    }, 1500);
+
+    return () => clearTimeout(listenTimer);
+  }, [videoId]);
+
+  // Show controls when paused; start hide-timer when playing
+  useEffect(() => {
+    if (!playing) {
+      clearTimeout(controlsTimerRef.current);
+      setShowControls(true);
+    } else {
+      resetControlsTimer();
+    }
+  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Smooth time increment when playing — always ticks, caps at duration when known
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => {
+      setCurrentTime(prev => duration > 0 ? Math.min(prev + 1, duration) : prev + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [playing, duration]);
 
   useEffect(() => {
     const onResize = () => {
@@ -72,12 +140,30 @@ export default function MiniPlayer() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Listen for YouTube iframe postMessage — state 0 = video ended
+  // YouTube postMessage listener
   useEffect(() => {
     const onMessage = (e) => {
       if (!String(e.origin).includes('youtube.com')) return;
       let data;
       try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+
+      // When the player is ready, register as a listener so YouTube
+      // sends periodic infoDelivery events with currentTime + duration
+      if (data?.event === 'onReady') {
+        iframeRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'listening', id: 1 }),
+          'https://www.youtube.com'
+        );
+      }
+
+      if (data?.event === 'infoDelivery' && data?.info) {
+        const cur = data.info.currentTime;
+        const dur = data.info.duration;
+        // Sync currentTime from YouTube (accurate position); allow 0 for video start
+        if (typeof cur === 'number') setCurrentTime(Math.floor(cur));
+        if (typeof dur === 'number' && dur > 0) setDuration(Math.floor(dur));
+      }
+
       if (data?.event === 'onStateChange') {
         if (data.info === 1) { setPlaying(true);  playingRef.current = true; }
         if (data.info === 2) { setPlaying(false); playingRef.current = false; }
@@ -91,13 +177,11 @@ export default function MiniPlayer() {
     return () => window.removeEventListener('message', onMessage);
   }, [minimized, nextVideo, location.pathname]);
 
-  // Cancel countdown on navigate/minimize/video-change
   useEffect(() => {
     clearTimeout(countdownRef.current);
     setCountdown(null);
   }, [location.pathname, minimized, videoId]);
 
-  // Tick the countdown
   useEffect(() => {
     if (countdown === null) return;
     if (countdown === 0) {
@@ -112,28 +196,40 @@ export default function MiniPlayer() {
 
   const cancelCountdown = () => { clearTimeout(countdownRef.current); setCountdown(null); };
 
-  const handleUnmute = () => {
-    setMuted(false);
+  const postCmd = (func, args = '') => {
     iframeRef.current?.contentWindow?.postMessage(
-      JSON.stringify({ event: 'command', func: 'unMute', args: '' }),
-      'https://www.youtube.com'
-    );
-    iframeRef.current?.contentWindow?.postMessage(
-      JSON.stringify({ event: 'command', func: 'setVolume', args: [100] }),
+      JSON.stringify({ event: 'command', func, args }),
       'https://www.youtube.com'
     );
   };
 
+  const handleUnmute = () => { setMuted(false); postCmd('unMute'); postCmd('setVolume', [100]); };
+
+  const handleMute = () => {
+    setMuted(true);
+    postCmd('mute');
+  };
+
+  const handleSeek = (seconds) => {
+    postCmd('seekTo', [seconds, true]);
+    setCurrentTime(Math.floor(seconds));
+  };
+
   if (!videoId) return null;
 
-  const onWatchPage  = location.pathname.startsWith('/watch/');
-  const showFull     = !minimized && onWatchPage;
-  // Fill the entire screen when landscape (video playing anywhere)
-  const showLandscape = landscape && !!videoId && !minimized;
+  const onWatchPage   = location.pathname.startsWith('/watch/');
+  const showFull      = !minimized && onWatchPage;
+
+  // On wide viewports (iPad/desktop), constrain video to 63% left column
+  const isWide = dims.w >= 1024;
+  // Landscape fill only applies to phones — iPad uses the 63/37 split regardless of orientation
+  const showLandscape = landscape && !!videoId && !minimized && !isWide;
+  const fullW   = isWide ? Math.round(dims.w * 0.68) : dims.w;
+  const fullTop = isWide ? 0 : safeTop;
 
   const fullStyle = {
-    position: 'fixed', top: 59, left: 0,
-    width: dims.w, height: Math.round(dims.w * 9 / 16),
+    position: 'fixed', top: fullTop, left: 0,
+    width: fullW, height: Math.round(fullW * 9 / 16),
     zIndex: 40, borderRadius: 0,
     transition: 'top 0.35s cubic-bezier(0.4,0,0.2,1), left 0.35s cubic-bezier(0.4,0,0.2,1), width 0.35s cubic-bezier(0.4,0,0.2,1), height 0.35s cubic-bezier(0.4,0,0.2,1), border-radius 0.35s ease',
   };
@@ -141,8 +237,7 @@ export default function MiniPlayer() {
   const landscapeStyle = {
     position: 'fixed', top: 0, left: 0,
     width: dims.w, height: dims.h,
-    zIndex: 50, borderRadius: 0,
-    background: '#000',
+    zIndex: 50, borderRadius: 0, background: '#000',
     transition: 'none',
   };
 
@@ -159,8 +254,12 @@ export default function MiniPlayer() {
 
   const src =
     `https://www.youtube.com/embed/${videoId}` +
-    `?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&fs=0` +
-    `&cc_load_policy=0&iv_load_policy=3&controls=1&enablejsapi=1`;
+    `?playsinline=1&rel=0&modestbranding=1&fs=0` +
+    `&cc_load_policy=0&iv_load_policy=3&controls=0&enablejsapi=1`;
+
+  // Seek bar progress %
+  const displayTime = dragTime ?? currentTime;
+  const pct = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
 
   const onTouchStart = (e) => {
     touchStartY.current = e.touches[0].clientY;
@@ -186,22 +285,45 @@ export default function MiniPlayer() {
     const dx = Math.abs(t.clientX - touchStartX.current);
     const dt = Date.now() - touchStartT.current;
     if (dy < 20 && dx < 20 && dt < 500) {
-      // Tap — toggle play/pause via postMessage (use ref to avoid stale closure)
-      const cmd = playingRef.current ? 'pauseVideo' : 'playVideo';
-      playingRef.current = !playingRef.current;
-      setPlaying(playingRef.current);
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ event: 'command', func: cmd, args: [] }),
-        'https://www.youtube.com'
-      );
+      // Tap: show controls if hidden, hide if already visible
+      if (showControls) {
+        setShowControls(false);
+        clearTimeout(controlsTimerRef.current);
+      } else {
+        resetControlsTimer();
+      }
     }
+  };
+
+  const handlePlayPause = () => {
+    const cmd = playingRef.current ? 'pauseVideo' : 'playVideo';
+    playingRef.current = !playingRef.current;
+    setPlaying(playingRef.current);
+    postCmd(cmd, []);
+    resetControlsTimer();
   };
 
   const handleExpand = () => { expand(); navigate(`/watch/${videoId}`); };
   const handleClose  = (e) => { e.stopPropagation(); close(); };
 
+  // Custom seek bar interaction helpers
+  const getSeekSecs = (clientX) => {
+    const rect = seekBarRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return Math.max(0, Math.min(duration || 0, ((clientX - rect.left) / rect.width) * (duration || 0)));
+  };
+  const onSeekTouchStart = (e) => { e.stopPropagation(); setIsSeeking(true); const s = getSeekSecs(e.touches[0].clientX); if (s !== null) setDragTime(s); };
+  const onSeekTouchMove  = (e) => { e.stopPropagation(); const s = getSeekSecs(e.touches[0].clientX); if (s !== null) { setDragTime(s); resetControlsTimer(); } };
+  const onSeekTouchEnd   = (e) => { e.stopPropagation(); setIsSeeking(false); if (dragTime !== null) { handleSeek(dragTime); setDragTime(null); } };
+  const onSeekClick      = (e) => { e.stopPropagation(); const s = getSeekSecs(e.clientX); if (s !== null) { handleSeek(s); resetControlsTimer(); } };
+
+  // Fullscreen always uses landscape style (fills entire viewport regardless of orientation)
+  const showFullViewport = showLandscape || (fullscreen && showFull);
+  // Always show custom controls (and gesture-blocking layer) in full mode
+  const showCustomControls = showFull;
+
   return (
-    <div style={showLandscape ? landscapeStyle : showFull ? fullStyle : miniStyle} className="bg-black">
+    <div style={showFullViewport ? landscapeStyle : showFull ? fullStyle : miniStyle} className="bg-black">
 
       <iframe
         key={videoId}
@@ -213,62 +335,152 @@ export default function MiniPlayer() {
         title="Video player"
       />
 
-      {/* Unmute button — video autoplays muted (iOS-safe), tap to unmute */}
-      {(showFull || showLandscape) && muted && (
-        <button
-          onClick={handleUnmute}
-          className="absolute bottom-14 right-3 z-30 flex items-center gap-1.5 bg-black/70 text-white text-xs font-medium px-3 py-1.5 rounded-full backdrop-blur-sm"
-          aria-label="Unmute"
-        >
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current flex-shrink-0">
-            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-          </svg>
-          Tap to unmute
-        </button>
-      )}
-
-      {/* ── Full-mode: swipe-to-minimize covers whole video; buttons at top ── */}
-      {showFull && !showLandscape && (
+      {/* ── Full-mode custom controls ── */}
+      {showCustomControls && (
         <>
-          {/* Full-video gesture layer — tap = play/pause, swipe down = minimize.
-              Stops 48px from the bottom so the YouTube progress/seek bar
-              remains touchable (touch events pass through to the iframe). */}
+          {/* Gesture layer — full video area. Swipe down = minimize, tap = toggle controls */}
+          <div className="absolute inset-0 z-10" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} />
+
+          {/* ── Settings panel (slides up from bottom) ── */}
+          {showSettings && (
+            <div className="absolute inset-0 z-30 flex items-end" onClick={() => setShowSettings(false)}>
+              <div className="w-full bg-black/95 rounded-t-2xl px-5 pt-4 pb-6" onClick={e => e.stopPropagation()}>
+                <div className="w-8 h-1 rounded-full bg-white/30 mx-auto mb-4" />
+                <p className="text-white/60 text-xs font-semibold uppercase tracking-wider mb-2">Playback speed</p>
+                <div className="flex gap-2 flex-wrap mb-5">
+                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map(s => (
+                    <button key={s} onClick={() => { setPlaybackSpeed(s); postCmd('setPlaybackRate', [s]); setShowSettings(false); }}
+                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${playbackSpeed === s ? 'bg-white text-black font-semibold' : 'bg-white/20 text-white'}`}>
+                      {s === 1 ? 'Normal' : `${s}×`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-white/60 text-xs font-semibold uppercase tracking-wider mb-2">Quality</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[['auto','Auto'],['hd1080','1080p'],['hd720','720p'],['large','480p'],['medium','360p']].map(([val, label]) => (
+                    <button key={val} onClick={() => { setPlaybackQuality(val); postCmd('setPlaybackQuality', [val]); setShowSettings(false); }}
+                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${playbackQuality === val ? 'bg-white text-black font-semibold' : 'bg-white/20 text-white'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Top bar: chevron-down (minimize) left, gear right ── */}
           <div
-            className="absolute inset-x-0 top-0 bottom-12 z-10"
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-          />
-          {/* Buttons row — on top of swipe catcher */}
-          <div
-            className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between h-12 px-1 pointer-events-none"
-            style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.5), transparent)' }}
+            className={`absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 h-12 pointer-events-none transition-opacity duration-200 ${showControls ? 'opacity-100' : 'opacity-0'}`}
+            style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)' }}
           >
-            <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" />
-            <button
-              onClick={() => { cancelCountdown(); close(); navigate('/home'); }}
-              className="bg-black/40 text-white rounded-full p-1.5 pointer-events-auto"
-              aria-label="Back"
-            >
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            <button onClick={() => { cancelCountdown(); exitFullscreen(); screen.orientation?.unlock?.(); minimize(); navigate('/home'); }}
+              className={`text-white p-1 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label="Minimize">
+              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
             </button>
-            <button
-              onClick={() => { cancelCountdown(); minimize(); navigate('/home'); }}
-              className="bg-black/40 text-white rounded-full p-1.5 pointer-events-auto"
-              aria-label="Minimize"
-            >
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M19 13H5v-2h14v2z"/></svg>
+            <button onClick={() => { setShowSettings(s => !s); resetControlsTimer(); }}
+              className={`text-white p-1 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label="Settings">
+              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
             </button>
           </div>
+
+          {/* ── Center: skip-back | play/pause | next ── */}
+          <div className={`absolute inset-0 z-20 flex items-center justify-center gap-10 pointer-events-none transition-opacity duration-200 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+            {/* Skip back 10s */}
+            <button onClick={() => { handleSeek(Math.max(0, currentTime - 10)); resetControlsTimer(); }}
+              className={`text-white ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label="Skip back 10s">
+              <svg viewBox="0 0 24 24" className="w-9 h-9 fill-white/90">
+                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+              </svg>
+            </button>
+            {/* Play / Pause */}
+            <button onClick={handlePlayPause}
+              className={`bg-black/50 rounded-full p-4 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label={playing ? 'Pause' : 'Play'}>
+              {playing
+                ? <svg viewBox="0 0 24 24" className="w-10 h-10 fill-white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                : <svg viewBox="0 0 24 24" className="w-10 h-10 fill-white"><path d="M8 5v14l11-7z"/></svg>
+              }
+            </button>
+            {/* Next video */}
+            <button
+              onClick={nextVideo ? () => { cancelCountdown(); openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`); } : undefined}
+              className={`text-white transition-opacity ${nextVideo ? '' : 'opacity-30'} ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`}
+              aria-label="Next video"
+            >
+              <svg viewBox="0 0 24 24" className="w-9 h-9 fill-white/90">
+                <path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* ── Bottom: gradient + time/mute/fullscreen + seek bar ── */}
+          <div
+            className={`absolute bottom-0 left-0 right-0 z-20 pointer-events-none transition-opacity duration-200 ${showControls ? 'opacity-100' : 'opacity-0'}`}
+            style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)' }}
+          >
+            {/* Time + mute + fullscreen */}
+            <div className="flex items-center px-4 pt-8 pb-1 gap-3">
+              <span className="text-white text-xs font-mono tabular-nums select-none">
+                {fmt(displayTime)}<span className="text-white/50 mx-1">/</span>{fmt(duration)}
+              </span>
+              <div className="flex-1" />
+              {/* Mute */}
+              <button onClick={() => { muted ? handleUnmute() : handleMute(); resetControlsTimer(); }}
+                className={`p-1 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label={muted ? 'Unmute' : 'Mute'}>
+                {muted
+                  ? <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                  : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                }
+              </button>
+              {/* Fullscreen */}
+              <button onClick={() => {
+                  if (fullscreen) {
+                    exitFullscreen();
+                    screen.orientation?.unlock?.();
+                  } else {
+                    enterFullscreen();
+                    screen.orientation?.lock?.('landscape').catch(() => {});
+                  }
+                  resetControlsTimer();
+                }}
+                className={`p-1 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                {fullscreen
+                  ? <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
+                  : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                }
+              </button>
+            </div>
+            {/* Seek bar — custom div-based for large touch area */}
+            <div
+              ref={seekBarRef}
+              className={`relative h-8 flex items-center px-0 cursor-pointer ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`}
+              onTouchStart={onSeekTouchStart}
+              onTouchMove={onSeekTouchMove}
+              onTouchEnd={onSeekTouchEnd}
+              onClick={onSeekClick}
+            >
+              {/* Track */}
+              <div className="w-full h-1 bg-white/30 rounded-full overflow-hidden">
+                <div className="h-full bg-yt-red" style={{ width: `${pct}%` }} />
+              </div>
+              {/* Thumb — large while dragging, small at rest */}
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 bg-white rounded-full shadow-md pointer-events-none transition-all duration-150 ${isSeeking ? 'w-5 h-5' : 'w-3 h-3'}`}
+                style={{ left: `${pct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Thin progress line when controls hidden — white only, no red */}
+          {!showControls && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 z-20 pointer-events-none bg-white/20">
+              <div className="h-full bg-white/60" style={{ width: `${pct}%` }} />
+            </div>
+          )}
         </>
       )}
 
-      {/* Block the YouTube logo/watermark in the bottom-right so it can't
-          launch the YouTube app. Covers the ~48×48px tap target. */}
-      <div className="absolute bottom-0 right-0 w-16 h-12 z-20" style={{ pointerEvents: 'auto' }} />
-
       {/* ── Autoplay countdown overlay ── */}
-      {showFull && countdown !== null && nextVideo && (
+      {showCustomControls && countdown !== null && nextVideo && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80">
           {nextVideo.thumbnail_url && (
             <div className="w-44 rounded-xl overflow-hidden mb-4 shadow-2xl">
@@ -303,7 +515,7 @@ export default function MiniPlayer() {
         </div>
       )}
 
-      {/* ── Landscape fullscreen overlay — rotate-back hint ── */}
+      {/* ── Landscape fullscreen: rotate hint ── */}
       {showLandscape && !showFull && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none">
           <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
@@ -313,21 +525,16 @@ export default function MiniPlayer() {
         </div>
       )}
 
-      {/* ── Mini-mode overlay — tap thumbnail to expand, buttons: play/pause + X ── */}
+      {/* ── Mini-mode: tap to expand, play/pause + close ── */}
       {minimized && (
         <>
-          {/* Tap anywhere on thumbnail to expand */}
           <div className="absolute inset-0 z-[5]" onClick={handleExpand} />
-          {/* Play/pause + close — right side */}
           <div className="absolute top-0 right-0 bottom-0 z-10 flex items-center gap-0.5 pr-1">
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 const cmd = playing ? 'pauseVideo' : 'playVideo';
-                iframeRef.current?.contentWindow?.postMessage(
-                  JSON.stringify({ event: 'command', func: cmd, args: '' }),
-                  'https://www.youtube.com'
-                );
+                postCmd(cmd, '');
               }}
               className="p-1.5" aria-label={playing ? 'Pause' : 'Play'}
             >

@@ -97,7 +97,7 @@ function CardMenu({ video, onClose, onRemoved }) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function VideoCard({ video, compact = false, disablePreview = false, watchProgress = null, onRemoved }) {
+export default function VideoCard({ video, compact = false, stacked = false, disablePreview = false, watchProgress = null, onRemoved }) {
   const navigate = useNavigate();
   const cardRef  = useRef(null);
 
@@ -134,6 +134,39 @@ export default function VideoCard({ video, compact = false, disablePreview = fal
   const openMenu = (e) => { e.stopPropagation(); e.preventDefault(); if (navigator.vibrate) navigator.vibrate(8); setMenuOpen(true); };
 
   // ── Compact card (sidebar / Up Next / Library) ───────────────────────────
+  // ── Stacked card (iPad sidebar — large thumbnail, title/meta below) ─────────
+  if (stacked) {
+    const metaParts = [video.channel_name, formatViews(video.view_count), timeAgo(video.published_at)].filter(Boolean);
+    return (
+      <>
+        <div className="w-full group">
+          <button onClick={() => goWatch(video.video_id)} className="block w-full text-left">
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-yt-card">
+              {video.thumbnail_url && (
+                <img src={video.thumbnail_url} alt={video.title} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              )}
+              {formatDuration(video.duration_seconds) && (
+                <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded font-mono">
+                  {formatDuration(video.duration_seconds)}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 pr-8">
+              <p className="text-yt-text text-sm font-medium line-clamp-2 leading-snug">{video.title}</p>
+              <p className="text-yt-muted text-xs mt-1">{metaParts.join(' · ')}</p>
+            </div>
+          </button>
+          <div className="relative -mt-9 flex justify-end pr-0">
+            <button onClick={openMenu} className="w-8 h-8 flex items-center justify-center text-yt-muted hover:text-yt-text transition-colors" aria-label="More options">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+            </button>
+          </div>
+        </div>
+        {menuOpen && <CardMenu video={video} onClose={() => setMenuOpen(false)} onRemoved={onRemoved} />}
+      </>
+    );
+  }
+
   if (compact) {
     const metaParts = [video.channel_name, formatViews(video.view_count), timeAgo(video.published_at)].filter(Boolean);
     return (
