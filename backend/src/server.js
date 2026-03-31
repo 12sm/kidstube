@@ -8,6 +8,7 @@ const db = require('./db');
 const auth = require('./auth');
 const cron = require('./cron');
 const youtube = require('./youtube');
+const recommendations = require('./recommendations');
 
 const crypto = require('crypto');
 
@@ -160,6 +161,14 @@ app.get('/api/channel/:channelId', (req, res) => {
 // Get related/up-next videos for a video
 app.get('/api/related/:videoId', (req, res) => {
   const { videoId } = req.params;
+  const profileId = parseInt(req.query.profile_id);
+
+  if (profileId) {
+    const videos = recommendations.getRecommendedVideos(db, videoId, profileId);
+    return res.json({ videos });
+  }
+
+  // Fallback: no profile context — use legacy related query
   const videos = db.getRelatedVideos(videoId);
   res.json({ videos });
 });

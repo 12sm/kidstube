@@ -73,7 +73,7 @@ export default function Watch() {
 
   useEffect(() => {
     if (!videoId) return;
-    fetch(`/api/related/${videoId}`)
+    fetch(`/api/related/${videoId}?profile_id=${profileId}`)
       .then(r => r.json())
       .then(data => {
         const videos = data.videos || [];
