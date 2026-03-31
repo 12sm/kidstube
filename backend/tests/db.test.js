@@ -87,7 +87,7 @@ describe('upsertProfileInterest', () => {
     const row = db.getDb().prepare(
       `SELECT weight FROM profile_interests WHERE profile_id = 1 AND tag = 'minecraft' AND source = 'behavior'`
     ).get();
-    expect(row.weight).toBeGreaterThanOrEqual(0);
+    expect(row.weight).toBe(0);
   });
 });
 
