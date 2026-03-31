@@ -9,7 +9,7 @@ const auth = require('./auth');
 const cron = require('./cron');
 const youtube = require('./youtube');
 const recommendations = require('./recommendations');
-const { runDailyInsightsPass } = require('./insights');
+const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
 
 const crypto = require('crypto');
@@ -441,6 +441,16 @@ app.post('/api/admin/profiles', requireAdmin, (req, res) => {
   if (!name) return res.status(400).json({ error: 'name required' });
   const profile = db.createProfile(name);
   res.json({ profile });
+});
+
+// Manual trigger for weekly consolidation pass
+app.post('/api/admin/consolidation/run', async (req, res) => {
+  try {
+    await runWeeklyConsolidationPass();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Manual trigger for daily insights pass

@@ -6,7 +6,7 @@ const ytdlp = require('./ytdlp');
 const filter = require('./filter');
 const { runLlmCheck } = require('./llm');
 const { parseTopicCategories } = require('./youtube');
-const { runDailyInsightsPass } = require('./insights');
+const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 
 let isRunning = false;
 
@@ -255,6 +255,12 @@ function scheduleJob() {
   cron.schedule('0 3 * * *', () => {
     console.log('[Insights] Triggered by schedule');
     runDailyInsightsPass().catch(err => console.error('[Insights] Unhandled error:', err));
+  });
+
+  // Weekly consolidation pass — Sunday at 4am
+  cron.schedule('0 4 * * 0', () => {
+    console.log('[Consolidation] Triggered by schedule');
+    runWeeklyConsolidationPass().catch(err => console.error('[Consolidation] Unhandled error:', err));
   });
 }
 

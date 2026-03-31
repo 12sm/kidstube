@@ -1,6 +1,8 @@
 'use strict';
 
 const db = require('./db');
+const Anthropic = require('@anthropic-ai/sdk');
+const childProfile = require('./childProfile');
 
 /**
  * Daily insights pass — runs at 3am, after the main ingest cron.
@@ -42,4 +44,60 @@ async function runDailyInsightsPass() {
   console.log('[Insights] Daily pass complete');
 }
 
-module.exports = { runDailyInsightsPass };
+/**
+ * Weekly consolidation pass — runs Sunday at 4am.
+ * For each profile with unconsolidated insights:
+ *   1. Read current child profile + all unconsolidated insights
+ *   2. Ask Haiku to update the profile based on observations
+ *   3. Save updated profile, mark insights consolidated
+ *   4. Refresh parent-source interest tags from new profile
+ */
+async function runWeeklyConsolidationPass() {
+  const profiles = db.getProfiles();
+  console.log(`[Consolidation] Starting weekly pass for ${profiles.length} profiles`);
+
+  for (const profile of profiles) {
+    const insights = db.getUnconsolidatedInsights(profile.id);
+    if (insights.length === 0) {
+      console.log(`[Consolidation] ${profile.name}: no unconsolidated insights, skipping`);
+      continue;
+    }
+
+    const profileRow   = db.getChildProfile(profile.id);
+    const currentMd    = profileRow?.markdown || '';
+    const insightLines = insights.map(i => `- ${i.insight} (${i.source})`).join('\n');
+
+    let updatedMd = currentMd;
+
+    if (process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_API_KEY.includes('placeholder')) {
+      try {
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const response = await client.messages.create({
+          model:      'claude-haiku-4-5',
+          max_tokens: 400,
+          system: `You update child profiles for a kids' content recommendation system.
+Return ONLY the updated profile text — no preamble, no explanation, no markdown headers.
+Keep it under 150 words. Promote confirmed patterns, strengthen existing interests, remove things that are no longer true.
+If no current profile exists, write a new one from the observations.`,
+          messages: [{
+            role: 'user',
+            content: `Current profile:\n${currentMd || '(none yet)'}\n\nRecent observations:\n${insightLines}\n\nReturn the updated profile.`,
+          }],
+        });
+        updatedMd = (response.content[0]?.text || currentMd).trim();
+      } catch (err) {
+        console.error(`[Consolidation] Haiku call failed for ${profile.name}:`, err.message);
+      }
+    }
+
+    db.saveChildProfile(profile.id, updatedMd, 'consolidation');
+    db.markInsightsConsolidated(profile.id);
+    await childProfile.refreshParentInterests(profile.id, updatedMd).catch(() => {});
+
+    console.log(`[Consolidation] ${profile.name}: profile updated, ${insights.length} insights consolidated`);
+  }
+
+  console.log('[Consolidation] Weekly pass complete');
+}
+
+module.exports = { runDailyInsightsPass, runWeeklyConsolidationPass };
