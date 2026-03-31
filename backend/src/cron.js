@@ -5,6 +5,7 @@ const rss = require('./rss');
 const ytdlp = require('./ytdlp');
 const filter = require('./filter');
 const { runLlmCheck } = require('./llm');
+const { parseTopicCategories } = require('./youtube');
 
 let isRunning = false;
 
@@ -48,6 +49,7 @@ async function runNightlyJob() {
       const filterRules = db.getFilterRules(profile.id);
 
       for (const video of newVideos) {
+        video._profileId = profile.id;
         await processVideo(video, filterRules, stats, false, null, llmState);
       }
 
@@ -64,6 +66,7 @@ async function runNightlyJob() {
             // Attach source info
             related.is_recommended = true;
             related.source_video_id = approvedVideo.video_id;
+            related._profileId = profile.id;
             await processVideo(related, filterRules, stats, true, approvedVideo.video_id, llmState);
           }
         } catch (err) {
@@ -179,20 +182,34 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     return;
   }
 
-  // Pass 2: LLM appropriateness check
+  // Pass 2: LLM appropriateness + tag extraction
   if (llmState && llmState.calls < llmState.cap) {
     llmState.calls++;
-    const llmResult = await runLlmCheck(enrichedVideo);
+
+    // Load child profile if available (attached by runNightlyJob per profile)
+    const childProfileRow = videoData._profileId ? db.getChildProfile(videoData._profileId) : null;
+    const childProfile = childProfileRow?.markdown || null;
+
+    // Parse YouTube topicCategories if present
+    const topicCategories = parseTopicCategories(enrichedVideo.topicCategories || []);
+    const creatorTags = Array.isArray(enrichedVideo.tags) ? enrichedVideo.tags : [];
+
+    const llmResult = await runLlmCheck(enrichedVideo, { childProfile, topicCategories, creatorTags });
+
     if (!llmResult.approved) {
       db.updateVideoStatus(videoId, 'rejected', `LLM: ${llmResult.reason || 'inappropriate content'}`);
       stats.rejected++;
       return;
     }
+
+    // Store tags for approved videos
+    if (llmResult.tags.length > 0) {
+      db.insertVideoTags(videoId, llmResult.tags);
+    }
   } else if (llmState && llmState.calls === llmState.cap) {
     console.warn(`[Cron] LLM cap of ${llmState.cap} reached — remaining videos will skip LLM check`);
   }
 
-  // All passes cleared — approve
   db.updateVideoStatus(videoId, 'approved');
   stats.approved++;
 }

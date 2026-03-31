@@ -49,7 +49,21 @@ async function getVideoMetadata(videoIds) {
         part: 'snippet,contentDetails,statistics,topicDetails',
         id: batch.join(',')
       });
-      results.push(...(res.data.items || []));
+      for (const item of res.data.items || []) {
+        results.push({
+          video_id: item.id,
+          title: item.snippet?.title || null,
+          description: item.snippet?.description || null,
+          thumbnail_url: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url || null,
+          channel_id: item.snippet?.channelId || null,
+          channel_name: item.snippet?.channelTitle || null,
+          published_at: item.snippet?.publishedAt || null,
+          duration_seconds: parseDuration(item.contentDetails?.duration),
+          view_count: item.statistics?.viewCount ? parseInt(item.statistics.viewCount) : null,
+          tags: item.snippet?.tags || [],
+          topicCategories: item.topicDetails?.topicCategories || []
+        });
+      }
     } catch (err) {
       console.error('Error fetching video metadata:', err.message);
     }
