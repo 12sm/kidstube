@@ -4,6 +4,7 @@ const youtube = require('./youtube');
 const rss = require('./rss');
 const ytdlp = require('./ytdlp');
 const filter = require('./filter');
+const { runLlmCheck } = require('./llm');
 
 let isRunning = false;
 
@@ -18,6 +19,8 @@ async function runNightlyJob() {
   const stats = { found: 0, approved: 0, rejected: 0, error: null };
 
   console.log(`[Cron] Starting nightly job (run #${runId})`);
+
+  const llmState = { calls: 0, cap: 300 };
 
   try {
     const profiles = db.getProfiles();
@@ -45,7 +48,7 @@ async function runNightlyJob() {
       const filterRules = db.getFilterRules(profile.id);
 
       for (const video of newVideos) {
-        await processVideo(video, filterRules, stats, false, null);
+        await processVideo(video, filterRules, stats, false, null, llmState);
       }
 
       // Step 5: Fetch related videos for newly approved videos (Phase 2 enhancement)
@@ -61,7 +64,7 @@ async function runNightlyJob() {
             // Attach source info
             related.is_recommended = true;
             related.source_video_id = approvedVideo.video_id;
-            await processVideo(related, filterRules, stats, true, approvedVideo.video_id);
+            await processVideo(related, filterRules, stats, true, approvedVideo.video_id, llmState);
           }
         } catch (err) {
           console.error(`[Cron] Related fetch failed for ${approvedVideo.video_id}:`, err.message);
@@ -84,7 +87,7 @@ async function runNightlyJob() {
   }
 }
 
-async function processVideo(videoData, filterRules, stats, isRecommended, sourceVideoId) {
+async function processVideo(videoData, filterRules, stats, isRecommended, sourceVideoId, llmState) {
   const videoId = videoData.video_id;
 
   // Insert as pending before fetching full data
@@ -174,6 +177,19 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     db.updateVideoStatus(videoId, 'rejected', fullFilterResult.reason);
     stats.rejected++;
     return;
+  }
+
+  // Pass 2: LLM appropriateness check
+  if (llmState && llmState.calls < llmState.cap) {
+    llmState.calls++;
+    const llmResult = await runLlmCheck(enrichedVideo);
+    if (!llmResult.approved) {
+      db.updateVideoStatus(videoId, 'rejected', `LLM: ${llmResult.reason || 'inappropriate content'}`);
+      stats.rejected++;
+      return;
+    }
+  } else if (llmState && llmState.calls >= llmState.cap) {
+    console.warn(`[Cron] LLM cap of ${llmState.cap} reached, skipping LLM check for ${videoId}`);
   }
 
   // All passes cleared — approve
