@@ -6,7 +6,12 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "migrate": "node migrate.js"
+    "migrate": "node migrate.js",
+    "test": "jest --testPathPatterns=tests/ --passWithNoTests"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/tests/**/*.test.js"]
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -22,6 +27,7 @@
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
+    "jest": "^30.3.0",
     "nodemon": "^3.1.9"
   }
 }

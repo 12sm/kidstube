@@ -46,10 +46,24 @@ async function getVideoMetadata(videoIds) {
     const batch = videoIds.slice(i, i + 50);
     try {
       const res = await youtube.videos.list({
-        part: 'snippet,contentDetails,statistics',
+        part: 'snippet,contentDetails,statistics,topicDetails',
         id: batch.join(',')
       });
-      results.push(...(res.data.items || []));
+      for (const item of res.data.items || []) {
+        results.push({
+          video_id: item.id,
+          title: item.snippet?.title || null,
+          description: item.snippet?.description || null,
+          thumbnail_url: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url || null,
+          channel_id: item.snippet?.channelId || null,
+          channel_name: item.snippet?.channelTitle || null,
+          published_at: item.snippet?.publishedAt || null,
+          duration_seconds: parseDuration(item.contentDetails?.duration),
+          view_count: item.statistics?.viewCount ? parseInt(item.statistics.viewCount) : null,
+          tags: item.snippet?.tags || [],
+          topicCategories: item.topicDetails?.topicCategories || []
+        });
+      }
     } catch (err) {
       console.error('Error fetching video metadata:', err.message);
     }
@@ -166,11 +180,32 @@ async function resolveChannelByUrl(input) {
   };
 }
 
+/**
+ * Extracts readable topic strings from YouTube's topicDetails.topicCategories.
+ * Input: ["https://en.wikipedia.org/wiki/Minecraft", "https://en.wikipedia.org/wiki/Video_game"]
+ * Output: ["Minecraft", "Video game"]
+ */
+function parseTopicCategories(topicCategories) {
+  if (!Array.isArray(topicCategories)) return [];
+  return topicCategories
+    .map(url => {
+      try {
+        const slug = url.split('/wiki/')[1];
+        if (!slug) return null;
+        return decodeURIComponent(slug).replace(/_/g, ' ');
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 module.exports = {
   getSubscriptions,
   getVideoMetadata,
   getChannelRecentVideos,
   enrichChannels,
   parseDuration,
-  resolveChannelByUrl
+  resolveChannelByUrl,
+  parseTopicCategories
 };

@@ -79,11 +79,17 @@ function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [msg, setMsg] = useState('');
+  const [profiles, setProfiles] = useState([]);
 
   useEffect(() => {
     fetch('/api/admin/stats', { credentials: 'include' })
       .then(r => r.json())
       .then(data => setStats(data))
+      .catch(() => {});
+
+    fetch('/api/profiles')
+      .then(r => r.json())
+      .then(d => setProfiles(d.profiles || []))
       .catch(() => {});
   }, []);
 
@@ -131,6 +137,19 @@ function AdminDashboard() {
           ))}
         </div>
       )}
+
+      {/* Child Profiles */}
+      <section className="mt-8">
+        <h2 className="text-yt-text font-semibold text-base mb-4">Child Profiles</h2>
+        <div className="space-y-6">
+          {profiles.map(profile => (
+            <div key={profile.id}>
+              <p className="text-yt-muted text-xs uppercase tracking-wider mb-2">{profile.name}</p>
+              <ChildProfileSection profile={profile} />
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -667,6 +686,186 @@ function ProfileSetup() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+const INTERVIEW_QUESTIONS = [
+  { key: 'ageGrade',  label: 'How old is {name} and what grade are they in?',  placeholder: 'e.g. 8 years old, 3rd grade' },
+  { key: 'loves',     label: 'What topics or subjects does {name} love?',       placeholder: 'e.g. Minecraft, outer space, cooking, animals' },
+  { key: 'avoid',     label: 'What topics or content should we avoid?',          placeholder: 'e.g. violence, scary content, adult humor' },
+  { key: 'tone',      label: 'How would you describe acceptable tone?',          placeholder: 'e.g. silly humor is fine, no yelling or trash talk' },
+  { key: 'other',     label: 'Anything else we should know about {name}?',       placeholder: 'Optional — leave blank to skip' },
+];
+
+function ChildProfileSetup({ profile, onComplete }) {
+  const [step, setStep]       = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  const question = INTERVIEW_QUESTIONS[step];
+  const label    = question.label.replace(/{name}/g, profile.name);
+
+  const handleNext = async () => {
+    if (step < INTERVIEW_QUESTIONS.length - 1) {
+      setStep(s => s + 1);
+      return;
+    }
+    // Final step — generate profile
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/child-profile/${profile.id}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileName: profile.name, answers }),
+      });
+      const data = await res.json();
+      if (data.ok) onComplete(data.markdown);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-yt-card rounded-xl p-5 space-y-4">
+      <p className="text-yt-muted text-xs uppercase tracking-wider">
+        Setting up {profile.name}'s profile — {step + 1} of {INTERVIEW_QUESTIONS.length}
+      </p>
+      <p className="text-yt-text font-medium">{label}</p>
+      <textarea
+        className="w-full bg-yt-surface border border-yt-border rounded-lg px-3 py-2 text-yt-text text-sm resize-none focus:outline-none focus:border-yt-muted"
+        rows={3}
+        placeholder={question.placeholder}
+        value={answers[question.key] || ''}
+        onChange={e => setAnswers(a => ({ ...a, [question.key]: e.target.value }))}
+      />
+      <button
+        onClick={handleNext}
+        disabled={loading || (!answers[question.key] && question.key !== 'other')}
+        className="px-4 py-2 bg-yt-red text-white rounded-lg text-sm font-medium disabled:opacity-50"
+      >
+        {loading ? 'Generating…' : step < INTERVIEW_QUESTIONS.length - 1 ? 'Next →' : 'Generate Profile'}
+      </button>
+    </div>
+  );
+}
+
+function ChildProfileSection({ profile }) {
+  const [profileData, setProfileData] = useState(null);
+  const [editing, setEditing]         = useState(false);
+  const [draft, setDraft]             = useState('');
+  const [saving, setSaving]           = useState(false);
+  const [insights, setInsights]       = useState([]);
+  const [consolidating, setConsolidating] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/admin/child-profile/${profile.id}`)
+      .then(r => r.json())
+      .then(d => {
+        setProfileData(d.profile);
+        if (d.profile) setDraft(d.profile.markdown);
+      })
+      .catch(() => {});
+
+    fetch(`/api/admin/insights/${profile.id}?days=7`)
+      .then(r => r.json())
+      .then(d => setInsights(d.insights || []))
+      .catch(() => {});
+  }, [profile.id]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await fetch(`/api/admin/child-profile/${profile.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown: draft }),
+    }).catch(() => {});
+    setProfileData(p => ({ ...p, markdown: draft, updated_by: 'parent', updated_at: new Date().toISOString() }));
+    setEditing(false);
+    setSaving(false);
+  };
+
+  const handleConsolidate = async () => {
+    setConsolidating(true);
+    await fetch('/api/admin/consolidation/run', { method: 'POST' }).catch(() => {});
+    // Refresh profile and insights after consolidation
+    const [pd, ins] = await Promise.all([
+      fetch(`/api/admin/child-profile/${profile.id}`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/admin/insights/${profile.id}?days=7`).then(r => r.json()).catch(() => ({})),
+    ]);
+    if (pd?.profile) { setProfileData(pd.profile); setDraft(pd.profile.markdown); }
+    if (ins?.insights) setInsights(ins.insights);
+    setConsolidating(false);
+  };
+
+  if (!profileData) {
+    return (
+      <ChildProfileSetup
+        profile={profile}
+        onComplete={(markdown) => setProfileData({ markdown, updated_by: 'parent', updated_at: new Date().toISOString() })}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-yt-card rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-yt-text font-medium text-sm">{profile.name}'s Profile</p>
+          <span className="text-yt-muted text-xs">
+            Updated {new Date(profileData.updated_at).toLocaleDateString()} by {profileData.updated_by}
+          </span>
+        </div>
+        {editing ? (
+          <>
+            <textarea
+              className="w-full bg-yt-surface border border-yt-border rounded-lg px-3 py-2 text-yt-text text-sm resize-none focus:outline-none focus:border-yt-muted"
+              rows={6}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+            />
+            <div className="flex gap-2 mt-2">
+              <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 bg-yt-red text-white rounded-lg text-sm disabled:opacity-50">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button onClick={() => { setEditing(false); setDraft(profileData.markdown); }} className="px-4 py-1.5 bg-yt-card border border-yt-border text-yt-text rounded-lg text-sm">
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-yt-muted text-sm leading-relaxed">{profileData.markdown}</p>
+            <button onClick={() => setEditing(true)} className="mt-3 px-4 py-1.5 bg-yt-card border border-yt-border text-yt-text rounded-lg text-sm">
+              Edit
+            </button>
+          </>
+        )}
+      </div>
+
+      {insights.length > 0 && (
+        <div className="bg-yt-card rounded-xl p-5">
+          <p className="text-yt-muted text-xs uppercase tracking-wider mb-3">Recent Observations (7 days)</p>
+          <ul className="space-y-1">
+            {insights.map(i => (
+              <li key={i.id} className="text-yt-text text-sm">
+                <span className="text-yt-muted text-xs mr-2">
+                  {new Date(i.created_at).toLocaleDateString()}
+                </span>
+                {i.insight}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <button
+        onClick={handleConsolidate}
+        disabled={consolidating}
+        className="px-4 py-1.5 bg-yt-card border border-yt-border text-yt-muted rounded-lg text-sm"
+      >
+        {consolidating ? 'Running…' : 'Run consolidation now'}
+      </button>
     </div>
   );
 }
