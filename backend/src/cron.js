@@ -113,6 +113,13 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     return;
   }
 
+  // Pass 0a: Shorts detection on RSS metadata
+  if (filter.isShort(videoData)) {
+    db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
+    stats.rejected++;
+    return;
+  }
+
   // Fetch full data via yt-dlp (metadata + transcript)
   let fullData = null;
   try {
@@ -154,8 +161,8 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     );
   }
 
-  // Reject YouTube Shorts (vertical short-form videos)
-  if (fullData?.is_short) {
+  // Pass 0b: Shorts detection on full yt-dlp data (aspect ratio, is_short flag)
+  if (fullData && filter.isShort(fullData)) {
     db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
     stats.rejected++;
     return;

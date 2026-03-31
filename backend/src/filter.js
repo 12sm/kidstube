@@ -65,4 +65,30 @@ function runFilterPass(video, rules) {
   return { rejected: false };
 }
 
-module.exports = { runFilterPass, applyKeywordFilter, applyChannelFilter };
+/**
+ * Pass 0: Shorts detection
+ * Any one signal firing means the video is a YouTube Short.
+ * Runs before keyword filter — cheap metadata check only.
+ */
+function isShort(video) {
+  // Signal 1: duration ≤ 60s
+  if (video.duration_seconds != null && video.duration_seconds <= 60) return true;
+
+  // Signal 2: self-labelled with #shorts or #short
+  const textFields = [
+    video.title,
+    video.description,
+    ...(Array.isArray(video.tags) ? video.tags : [])
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (/#shorts?\b/.test(textFields)) return true;
+
+  // Signal 3: yt-dlp is_short flag
+  if (video.is_short === true) return true;
+
+  // Signal 4: vertical aspect ratio (height > width)
+  if (video.width && video.height && video.height > video.width) return true;
+
+  return false;
+}
+
+module.exports = { runFilterPass, applyKeywordFilter, applyChannelFilter, isShort };
