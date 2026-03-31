@@ -46,7 +46,7 @@ async function getVideoMetadata(videoIds) {
     const batch = videoIds.slice(i, i + 50);
     try {
       const res = await youtube.videos.list({
-        part: 'snippet,contentDetails,statistics',
+        part: 'snippet,contentDetails,statistics,topicDetails',
         id: batch.join(',')
       });
       results.push(...(res.data.items || []));
@@ -166,11 +166,32 @@ async function resolveChannelByUrl(input) {
   };
 }
 
+/**
+ * Extracts readable topic strings from YouTube's topicDetails.topicCategories.
+ * Input: ["https://en.wikipedia.org/wiki/Minecraft", "https://en.wikipedia.org/wiki/Video_game"]
+ * Output: ["Minecraft", "Video game"]
+ */
+function parseTopicCategories(topicCategories) {
+  if (!Array.isArray(topicCategories)) return [];
+  return topicCategories
+    .map(url => {
+      try {
+        const slug = url.split('/wiki/')[1];
+        if (!slug) return null;
+        return decodeURIComponent(slug).replace(/_/g, ' ');
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 module.exports = {
   getSubscriptions,
   getVideoMetadata,
   getChannelRecentVideos,
   enrichChannels,
   parseDuration,
-  resolveChannelByUrl
+  resolveChannelByUrl,
+  parseTopicCategories
 };
