@@ -185,12 +185,14 @@ app.get('/api/video/:videoId', (req, res) => {
 app.post('/api/watch-history', (req, res) => {
   const { profile_id, video_id, progress_seconds, duration_seconds } = req.body;
   if (!profile_id || !video_id) return res.status(400).json({ error: 'Missing required fields' });
-  db.upsertWatchHistory(
-    parseInt(profile_id),
-    video_id,
-    Math.floor(progress_seconds || 0),
-    Math.floor(duration_seconds || 0)
-  );
+
+  const profileId    = parseInt(profile_id);
+  const progressSecs = Math.floor(progress_seconds || 0);
+  const durationSecs = Math.floor(duration_seconds || 0);
+
+  db.upsertWatchHistory(profileId, video_id, progressSecs, durationSecs);
+  db.applyCompletionToInterests(profileId, video_id, progressSecs, durationSecs);
+
   res.json({ ok: true });
 });
 
@@ -216,6 +218,29 @@ app.post('/api/not-interested', (req, res) => {
   if (!profile_id || !video_id) return res.status(400).json({ error: 'Missing required fields' });
   db.blockVideo(parseInt(profile_id), video_id);
   db.removeFromHistory(parseInt(profile_id), video_id);
+  db.applyReactionToInterests(parseInt(profile_id), video_id, 'not-interested');
+  res.json({ ok: true });
+});
+
+// Kid-facing like/dislike reaction
+app.post('/api/video/:videoId/react', (req, res) => {
+  const { videoId } = req.params;
+  const { profile_id, reaction } = req.body;
+  if (!profile_id || !reaction || !['like', 'dislike'].includes(reaction)) {
+    return res.status(400).json({ error: 'profile_id and reaction (like|dislike) required' });
+  }
+  db.applyReactionToInterests(parseInt(profile_id), videoId, reaction);
+  res.json({ ok: true });
+});
+
+// Parent admin like/dislike reaction (same logic, separate route for clarity)
+app.post('/api/admin/video/:videoId/react', (req, res) => {
+  const { videoId } = req.params;
+  const { profile_id, reaction } = req.body;
+  if (!profile_id || !reaction || !['like', 'dislike'].includes(reaction)) {
+    return res.status(400).json({ error: 'profile_id and reaction (like|dislike) required' });
+  }
+  db.applyReactionToInterests(parseInt(profile_id), videoId, reaction);
   res.json({ ok: true });
 });
 

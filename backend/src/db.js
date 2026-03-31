@@ -647,6 +647,45 @@ function getTagStatsByDay(profileId, dateStr) {
   `).all(profileId, dateStr);
 }
 
+const REACTION_DELTAS = {
+  like:             +1.5,
+  dislike:          -0.8,
+  'not-interested': -1.0,
+};
+
+function applyReactionToInterests(profileId, videoId, reaction) {
+  const delta = REACTION_DELTAS[reaction];
+  if (delta == null) return;
+
+  const tags = getVideoTags(videoId);
+  for (const tag of tags) {
+    upsertProfileInterest(profileId, tag, delta, 'behavior');
+  }
+
+  insertProfileInsight(
+    profileId,
+    `${reaction === 'like' ? 'Liked' : reaction === 'dislike' ? 'Disliked' : 'Not interested in'} video (${videoId})`,
+    reaction
+  );
+}
+
+function applyCompletionToInterests(profileId, videoId, progressSeconds, durationSeconds) {
+  if (!durationSeconds || durationSeconds <= 0) return;
+
+  const ratio = progressSeconds / durationSeconds;
+  if (ratio < 0.8) return; // Only signal on 80%+ completion
+
+  let delta;
+  if      (durationSeconds > 300) delta = 1.0;  // > 5 min: strong signal
+  else if (durationSeconds > 120) delta = 0.5;  // 2–5 min: medium signal
+  else                            delta = 0.3;  // < 2 min: weak signal
+
+  const tags = getVideoTags(videoId);
+  for (const tag of tags) {
+    upsertProfileInterest(profileId, tag, delta, 'behavior');
+  }
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -695,4 +734,6 @@ module.exports = {
   getChildProfile,
   saveChildProfile,
   getTagStatsByDay,
+  applyReactionToInterests,
+  applyCompletionToInterests,
 };
