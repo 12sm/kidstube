@@ -105,17 +105,17 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     source_video_id: sourceVideoId || null
   });
 
-  // Pass 1: Quick keyword filter on existing metadata
-  const quickFilterResult = filter.runFilterPass(videoData, filterRules);
-  if (quickFilterResult.rejected) {
-    db.updateVideoStatus(videoId, 'rejected', quickFilterResult.reason);
+  // Pass 0a: Shorts detection on RSS metadata
+  if (filter.isShort(videoData)) {
+    db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
     stats.rejected++;
     return;
   }
 
-  // Pass 0a: Shorts detection on RSS metadata
-  if (filter.isShort(videoData)) {
-    db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
+  // Pass 1: Quick keyword filter on existing metadata
+  const quickFilterResult = filter.runFilterPass(videoData, filterRules);
+  if (quickFilterResult.rejected) {
+    db.updateVideoStatus(videoId, 'rejected', quickFilterResult.reason);
     stats.rejected++;
     return;
   }
