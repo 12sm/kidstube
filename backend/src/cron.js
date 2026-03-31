@@ -188,8 +188,8 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
       stats.rejected++;
       return;
     }
-  } else if (llmState && llmState.calls >= llmState.cap) {
-    console.warn(`[Cron] LLM cap of ${llmState.cap} reached, skipping LLM check for ${videoId}`);
+  } else if (llmState && llmState.calls === llmState.cap) {
+    console.warn(`[Cron] LLM cap of ${llmState.cap} reached — remaining videos will skip LLM check`);
   }
 
   // All passes cleared — approve
