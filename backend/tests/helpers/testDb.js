@@ -4,6 +4,8 @@ process.env.DB_PATH = ':memory:';
 
 const db = require('../../src/db');
 
+// NOTE: setupTestDb() returns the same db module reference every call within a test file.
+// Call teardownTestDb(db) in afterEach/afterAll to clear state between tests.
 function setupTestDb() {
   db.migrate();
   return db;
@@ -35,4 +37,17 @@ function seedInterest(db, profileId, tag, weight, source = 'behavior') {
   `).run(profileId, tag, weight, source);
 }
 
-module.exports = { setupTestDb, seedProfile, seedVideo, seedTag, seedInterest };
+function teardownTestDb(db) {
+  // Delete in FK-safe order (children before parents)
+  db.getDb().prepare('DELETE FROM profile_interests').run();
+  db.getDb().prepare('DELETE FROM profile_insights').run();
+  db.getDb().prepare('DELETE FROM child_profiles').run();
+  db.getDb().prepare('DELETE FROM video_tags').run();
+  db.getDb().prepare('DELETE FROM watch_history').run();
+  db.getDb().prepare('DELETE FROM filter_rules').run();
+  db.getDb().prepare('DELETE FROM videos').run();
+  db.getDb().prepare('DELETE FROM channels').run();
+  db.getDb().prepare('DELETE FROM profiles').run();
+}
+
+module.exports = { setupTestDb, seedProfile, seedVideo, seedTag, seedInterest, teardownTestDb };
