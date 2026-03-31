@@ -27,3 +27,6 @@ frontend/.vite/
 # Playwright-generated screenshots (ephemeral, rebuilt on demand)
 screenshots/playwright/
 *.docx
+
+# Git worktrees
+.worktrees/
