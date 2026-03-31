@@ -8,6 +8,9 @@ const db = require('./db');
 const auth = require('./auth');
 const cron = require('./cron');
 const youtube = require('./youtube');
+const recommendations = require('./recommendations');
+const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
+const childProfile = require('./childProfile');
 
 const crypto = require('crypto');
 
@@ -160,6 +163,14 @@ app.get('/api/channel/:channelId', (req, res) => {
 // Get related/up-next videos for a video
 app.get('/api/related/:videoId', (req, res) => {
   const { videoId } = req.params;
+  const profileId = parseInt(req.query.profile_id);
+
+  if (profileId) {
+    const videos = recommendations.getRecommendedVideos(db, videoId, profileId);
+    return res.json({ videos });
+  }
+
+  // Fallback: no profile context — use legacy related query
   const videos = db.getRelatedVideos(videoId);
   res.json({ videos });
 });
@@ -185,12 +196,14 @@ app.get('/api/video/:videoId', (req, res) => {
 app.post('/api/watch-history', (req, res) => {
   const { profile_id, video_id, progress_seconds, duration_seconds } = req.body;
   if (!profile_id || !video_id) return res.status(400).json({ error: 'Missing required fields' });
-  db.upsertWatchHistory(
-    parseInt(profile_id),
-    video_id,
-    Math.floor(progress_seconds || 0),
-    Math.floor(duration_seconds || 0)
-  );
+
+  const profileId    = parseInt(profile_id);
+  const progressSecs = Math.floor(progress_seconds || 0);
+  const durationSecs = Math.floor(duration_seconds || 0);
+
+  db.upsertWatchHistory(profileId, video_id, progressSecs, durationSecs);
+  db.applyCompletionToInterests(profileId, video_id, progressSecs, durationSecs);
+
   res.json({ ok: true });
 });
 
@@ -216,6 +229,29 @@ app.post('/api/not-interested', (req, res) => {
   if (!profile_id || !video_id) return res.status(400).json({ error: 'Missing required fields' });
   db.blockVideo(parseInt(profile_id), video_id);
   db.removeFromHistory(parseInt(profile_id), video_id);
+  db.applyReactionToInterests(parseInt(profile_id), video_id, 'not-interested');
+  res.json({ ok: true });
+});
+
+// Kid-facing like/dislike reaction
+app.post('/api/video/:videoId/react', (req, res) => {
+  const { videoId } = req.params;
+  const { profile_id, reaction } = req.body;
+  if (!profile_id || !reaction || !['like', 'dislike'].includes(reaction)) {
+    return res.status(400).json({ error: 'profile_id and reaction (like|dislike) required' });
+  }
+  db.applyReactionToInterests(parseInt(profile_id), videoId, reaction);
+  res.json({ ok: true });
+});
+
+// Parent admin like/dislike reaction (same logic, separate route for clarity)
+app.post('/api/admin/video/:videoId/react', requireAdmin, (req, res) => {
+  const { videoId } = req.params;
+  const { profile_id, reaction } = req.body;
+  if (!profile_id || !reaction || !['like', 'dislike'].includes(reaction)) {
+    return res.status(400).json({ error: 'profile_id and reaction (like|dislike) required' });
+  }
+  db.applyReactionToInterests(parseInt(profile_id), videoId, reaction);
   res.json({ ok: true });
 });
 
@@ -405,6 +441,79 @@ app.post('/api/admin/profiles', requireAdmin, (req, res) => {
   if (!name) return res.status(400).json({ error: 'name required' });
   const profile = db.createProfile(name);
   res.json({ profile });
+});
+
+// Manual trigger for weekly consolidation pass
+app.post('/api/admin/consolidation/run', requireAdmin, async (req, res) => {
+  try {
+    await runWeeklyConsolidationPass();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manual trigger for daily insights pass
+app.post('/api/admin/insights/run', requireAdmin, async (req, res) => {
+  try {
+    await runDailyInsightsPass();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Child Profile Routes ──────────────────────────────────────────────────────
+
+// Get child profile for a profile
+app.get('/api/admin/child-profile/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const profile = db.getChildProfile(profileId);
+  res.json({ profile: profile || null });
+});
+
+// Save child profile (manual edit by parent)
+app.post('/api/admin/child-profile/:profileId', requireAdmin, async (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { markdown } = req.body;
+  if (!markdown) return res.status(400).json({ error: 'markdown required' });
+
+  db.saveChildProfile(profileId, markdown, 'parent');
+  await childProfile.refreshParentInterests(profileId, markdown).catch(() => {});
+  res.json({ ok: true });
+});
+
+// Generate initial child profile from interview answers
+app.post('/api/admin/child-profile/:profileId/generate', requireAdmin, async (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { profileName, answers } = req.body;
+
+  if (!profileName || !answers) {
+    return res.status(400).json({ error: 'profileName and answers required' });
+  }
+
+  try {
+    const markdown = await childProfile.generateChildProfile(profileName, answers);
+    db.saveChildProfile(profileId, markdown, 'parent');
+    await childProfile.refreshParentInterests(profileId, markdown).catch(() => {});
+    res.json({ ok: true, markdown });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get recent insights for a profile
+app.get('/api/admin/insights/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const days = parseInt(req.query.days) || 7;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const insights = db.getDb().prepare(`
+    SELECT * FROM profile_insights
+    WHERE profile_id = ? AND created_at > ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).all(profileId, cutoff);
+  res.json({ insights });
 });
 
 // ── Start server ──────────────────────────────────────────────────────────────

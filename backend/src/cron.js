@@ -4,6 +4,9 @@ const youtube = require('./youtube');
 const rss = require('./rss');
 const ytdlp = require('./ytdlp');
 const filter = require('./filter');
+const { runLlmCheck } = require('./llm');
+const { parseTopicCategories } = require('./youtube');
+const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 
 let isRunning = false;
 
@@ -18,6 +21,8 @@ async function runNightlyJob() {
   const stats = { found: 0, approved: 0, rejected: 0, error: null };
 
   console.log(`[Cron] Starting nightly job (run #${runId})`);
+
+  const llmState = { calls: 0, cap: 300 };
 
   try {
     const profiles = db.getProfiles();
@@ -45,7 +50,8 @@ async function runNightlyJob() {
       const filterRules = db.getFilterRules(profile.id);
 
       for (const video of newVideos) {
-        await processVideo(video, filterRules, stats, false, null);
+        video._profileId = profile.id;
+        await processVideo(video, filterRules, stats, false, null, llmState);
       }
 
       // Step 5: Fetch related videos for newly approved videos (Phase 2 enhancement)
@@ -61,7 +67,8 @@ async function runNightlyJob() {
             // Attach source info
             related.is_recommended = true;
             related.source_video_id = approvedVideo.video_id;
-            await processVideo(related, filterRules, stats, true, approvedVideo.video_id);
+            related._profileId = profile.id;
+            await processVideo(related, filterRules, stats, true, approvedVideo.video_id, llmState);
           }
         } catch (err) {
           console.error(`[Cron] Related fetch failed for ${approvedVideo.video_id}:`, err.message);
@@ -84,7 +91,7 @@ async function runNightlyJob() {
   }
 }
 
-async function processVideo(videoData, filterRules, stats, isRecommended, sourceVideoId) {
+async function processVideo(videoData, filterRules, stats, isRecommended, sourceVideoId, llmState) {
   const videoId = videoData.video_id;
 
   // Insert as pending before fetching full data
@@ -104,6 +111,13 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     is_recommended: isRecommended ? 1 : 0,
     source_video_id: sourceVideoId || null
   });
+
+  // Pass 0a: Shorts detection on RSS metadata
+  if (filter.isShort(videoData)) {
+    db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
+    stats.rejected++;
+    return;
+  }
 
   // Pass 1: Quick keyword filter on existing metadata
   const quickFilterResult = filter.runFilterPass(videoData, filterRules);
@@ -154,8 +168,8 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     );
   }
 
-  // Reject YouTube Shorts (vertical short-form videos)
-  if (fullData?.is_short) {
+  // Pass 0b: Shorts detection on full yt-dlp data (aspect ratio, is_short flag)
+  if (fullData && filter.isShort(fullData)) {
     db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
     stats.rejected++;
     return;
@@ -169,7 +183,34 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     return;
   }
 
-  // All passes cleared — approve
+  // Pass 2: LLM appropriateness + tag extraction
+  if (llmState && llmState.calls < llmState.cap) {
+    llmState.calls++;
+
+    // Load child profile if available (attached by runNightlyJob per profile)
+    const childProfileRow = videoData._profileId ? db.getChildProfile(videoData._profileId) : null;
+    const childProfile = childProfileRow?.markdown || null;
+
+    // Parse YouTube topicCategories if present
+    const topicCategories = parseTopicCategories(enrichedVideo.topicCategories || []);
+    const creatorTags = Array.isArray(enrichedVideo.tags) ? enrichedVideo.tags : [];
+
+    const llmResult = await runLlmCheck(enrichedVideo, { childProfile, topicCategories, creatorTags });
+
+    if (!llmResult.approved) {
+      db.updateVideoStatus(videoId, 'rejected', `LLM: ${llmResult.reason || 'inappropriate content'}`);
+      stats.rejected++;
+      return;
+    }
+
+    // Store tags for approved videos
+    if (llmResult.tags.length > 0) {
+      db.insertVideoTags(videoId, llmResult.tags);
+    }
+  } else if (llmState && llmState.calls === llmState.cap) {
+    console.warn(`[Cron] LLM cap of ${llmState.cap} reached — remaining videos will skip LLM check`);
+  }
+
   db.updateVideoStatus(videoId, 'approved');
   stats.approved++;
 }
@@ -208,6 +249,18 @@ function scheduleJob() {
   cron.schedule(schedule, () => {
     console.log('[Cron] Triggered by schedule');
     runNightlyJob().catch(err => console.error('[Cron] Unhandled error:', err));
+  });
+
+  // Daily insights pass — 3am, after main ingest
+  cron.schedule('0 3 * * *', () => {
+    console.log('[Insights] Triggered by schedule');
+    runDailyInsightsPass().catch(err => console.error('[Insights] Unhandled error:', err));
+  });
+
+  // Weekly consolidation pass — Sunday at 4am
+  cron.schedule('0 4 * * 0', () => {
+    console.log('[Consolidation] Triggered by schedule');
+    runWeeklyConsolidationPass().catch(err => console.error('[Consolidation] Unhandled error:', err));
   });
 }
 
