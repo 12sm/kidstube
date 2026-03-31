@@ -11,6 +11,10 @@ const db = require('./db');
  * @returns {Promise<string>} markdown profile text
  */
 async function generateChildProfile(profileName, answers) {
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes('placeholder')) {
+    return `${profileName} is a child who enjoys age-appropriate content. No detailed profile available yet.`;
+  }
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const userMessage = [
@@ -44,6 +48,10 @@ Do not include headers or bullet points — write it as a short paragraph.`,
  */
 async function extractParentTags(markdown) {
   if (!markdown) return [];
+
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes('placeholder')) {
+    return [];
+  }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 

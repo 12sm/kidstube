@@ -245,7 +245,7 @@ app.post('/api/video/:videoId/react', (req, res) => {
 });
 
 // Parent admin like/dislike reaction (same logic, separate route for clarity)
-app.post('/api/admin/video/:videoId/react', (req, res) => {
+app.post('/api/admin/video/:videoId/react', requireAdmin, (req, res) => {
   const { videoId } = req.params;
   const { profile_id, reaction } = req.body;
   if (!profile_id || !reaction || !['like', 'dislike'].includes(reaction)) {
@@ -444,7 +444,7 @@ app.post('/api/admin/profiles', requireAdmin, (req, res) => {
 });
 
 // Manual trigger for weekly consolidation pass
-app.post('/api/admin/consolidation/run', async (req, res) => {
+app.post('/api/admin/consolidation/run', requireAdmin, async (req, res) => {
   try {
     await runWeeklyConsolidationPass();
     res.json({ ok: true });
@@ -454,7 +454,7 @@ app.post('/api/admin/consolidation/run', async (req, res) => {
 });
 
 // Manual trigger for daily insights pass
-app.post('/api/admin/insights/run', async (req, res) => {
+app.post('/api/admin/insights/run', requireAdmin, async (req, res) => {
   try {
     await runDailyInsightsPass();
     res.json({ ok: true });
@@ -466,14 +466,14 @@ app.post('/api/admin/insights/run', async (req, res) => {
 // ── Child Profile Routes ──────────────────────────────────────────────────────
 
 // Get child profile for a profile
-app.get('/api/admin/child-profile/:profileId', (req, res) => {
+app.get('/api/admin/child-profile/:profileId', requireAdmin, (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const profile = db.getChildProfile(profileId);
   res.json({ profile: profile || null });
 });
 
 // Save child profile (manual edit by parent)
-app.post('/api/admin/child-profile/:profileId', async (req, res) => {
+app.post('/api/admin/child-profile/:profileId', requireAdmin, async (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const { markdown } = req.body;
   if (!markdown) return res.status(400).json({ error: 'markdown required' });
@@ -484,7 +484,7 @@ app.post('/api/admin/child-profile/:profileId', async (req, res) => {
 });
 
 // Generate initial child profile from interview answers
-app.post('/api/admin/child-profile/:profileId/generate', async (req, res) => {
+app.post('/api/admin/child-profile/:profileId/generate', requireAdmin, async (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const { profileName, answers } = req.body;
 
@@ -503,7 +503,7 @@ app.post('/api/admin/child-profile/:profileId/generate', async (req, res) => {
 });
 
 // Get recent insights for a profile
-app.get('/api/admin/insights/:profileId', (req, res) => {
+app.get('/api/admin/insights/:profileId', requireAdmin, (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const days = parseInt(req.query.days) || 7;
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
