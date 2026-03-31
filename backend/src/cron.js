@@ -6,6 +6,7 @@ const ytdlp = require('./ytdlp');
 const filter = require('./filter');
 const { runLlmCheck } = require('./llm');
 const { parseTopicCategories } = require('./youtube');
+const { runDailyInsightsPass } = require('./insights');
 
 let isRunning = false;
 
@@ -248,6 +249,12 @@ function scheduleJob() {
   cron.schedule(schedule, () => {
     console.log('[Cron] Triggered by schedule');
     runNightlyJob().catch(err => console.error('[Cron] Unhandled error:', err));
+  });
+
+  // Daily insights pass — 3am, after main ingest
+  cron.schedule('0 3 * * *', () => {
+    console.log('[Insights] Triggered by schedule');
+    runDailyInsightsPass().catch(err => console.error('[Insights] Unhandled error:', err));
   });
 }
 

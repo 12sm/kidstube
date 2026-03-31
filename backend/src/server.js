@@ -9,6 +9,8 @@ const auth = require('./auth');
 const cron = require('./cron');
 const youtube = require('./youtube');
 const recommendations = require('./recommendations');
+const { runDailyInsightsPass } = require('./insights');
+const childProfile = require('./childProfile');
 
 const crypto = require('crypto');
 
@@ -439,6 +441,69 @@ app.post('/api/admin/profiles', requireAdmin, (req, res) => {
   if (!name) return res.status(400).json({ error: 'name required' });
   const profile = db.createProfile(name);
   res.json({ profile });
+});
+
+// Manual trigger for daily insights pass
+app.post('/api/admin/insights/run', async (req, res) => {
+  try {
+    await runDailyInsightsPass();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Child Profile Routes ──────────────────────────────────────────────────────
+
+// Get child profile for a profile
+app.get('/api/admin/child-profile/:profileId', (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const profile = db.getChildProfile(profileId);
+  res.json({ profile: profile || null });
+});
+
+// Save child profile (manual edit by parent)
+app.post('/api/admin/child-profile/:profileId', async (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { markdown } = req.body;
+  if (!markdown) return res.status(400).json({ error: 'markdown required' });
+
+  db.saveChildProfile(profileId, markdown, 'parent');
+  await childProfile.refreshParentInterests(profileId, markdown).catch(() => {});
+  res.json({ ok: true });
+});
+
+// Generate initial child profile from interview answers
+app.post('/api/admin/child-profile/:profileId/generate', async (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { profileName, answers } = req.body;
+
+  if (!profileName || !answers) {
+    return res.status(400).json({ error: 'profileName and answers required' });
+  }
+
+  try {
+    const markdown = await childProfile.generateChildProfile(profileName, answers);
+    db.saveChildProfile(profileId, markdown, 'parent');
+    await childProfile.refreshParentInterests(profileId, markdown).catch(() => {});
+    res.json({ ok: true, markdown });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get recent insights for a profile
+app.get('/api/admin/insights/:profileId', (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const days = parseInt(req.query.days) || 7;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const insights = db.getDb().prepare(`
+    SELECT * FROM profile_insights
+    WHERE profile_id = ? AND created_at > ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).all(profileId, cutoff);
+  res.json({ insights });
 });
 
 // ── Start server ──────────────────────────────────────────────────────────────
