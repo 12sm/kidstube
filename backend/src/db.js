@@ -101,6 +101,43 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_channels_profile ON channels(profile_id);
     CREATE INDEX IF NOT EXISTS idx_rules_profile ON filter_rules(profile_id);
     CREATE INDEX IF NOT EXISTS idx_watch_history_profile ON watch_history(profile_id, watched_at DESC);
+
+    CREATE TABLE IF NOT EXISTS video_tags (
+      video_id  TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+      tag       TEXT NOT NULL,
+      weight    REAL NOT NULL DEFAULT 1.0,
+      PRIMARY KEY (video_id, tag)
+    );
+
+    CREATE TABLE IF NOT EXISTS profile_interests (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+      tag         TEXT NOT NULL,
+      weight      REAL NOT NULL DEFAULT 1.0,
+      source      TEXT NOT NULL DEFAULT 'behavior',
+      last_seen   DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(profile_id, tag, source)
+    );
+
+    CREATE TABLE IF NOT EXISTS profile_insights (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id   INTEGER NOT NULL REFERENCES profiles(id),
+      insight      TEXT NOT NULL,
+      source       TEXT NOT NULL,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+      consolidated INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS child_profiles (
+      profile_id  INTEGER PRIMARY KEY REFERENCES profiles(id),
+      markdown    TEXT NOT NULL DEFAULT '',
+      updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_by  TEXT NOT NULL DEFAULT 'parent'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag);
+    CREATE INDEX IF NOT EXISTS idx_profile_interests_profile ON profile_interests(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_profile_insights_profile ON profile_insights(profile_id, consolidated);
   `);
 
   // Fix videos.channel_id FK — channel_id is no longer a unique key in channels after composite-key migration
@@ -490,6 +527,126 @@ function getStats() {
   };
 }
 
+// --- Video tags ---
+
+function insertVideoTags(videoId, tags) {
+  const insert = getDb().prepare(
+    `INSERT OR IGNORE INTO video_tags (video_id, tag) VALUES (?, ?)`
+  );
+  const insertMany = getDb().transaction((tags) => {
+    for (const tag of tags) insert.run(videoId, tag);
+  });
+  insertMany(tags);
+}
+
+function getVideoTags(videoId) {
+  return getDb().prepare(
+    `SELECT tag FROM video_tags WHERE video_id = ?`
+  ).all(videoId).map(r => r.tag);
+}
+
+// --- Profile interests ---
+
+function upsertProfileInterest(profileId, tag, delta, source = 'behavior') {
+  getDb().prepare(`
+    INSERT INTO profile_interests (profile_id, tag, weight, source, last_seen)
+    VALUES (?, ?, MAX(0.0, ?), ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(profile_id, tag, source) DO UPDATE SET
+      weight    = MAX(0.0, weight + ?),
+      last_seen = CURRENT_TIMESTAMP
+  `).run(profileId, tag, Math.max(0, delta), source, delta);
+}
+
+function setParentInterest(profileId, tag, weight) {
+  getDb().prepare(`
+    INSERT INTO profile_interests (profile_id, tag, weight, source, last_seen)
+    VALUES (?, ?, ?, 'parent', CURRENT_TIMESTAMP)
+    ON CONFLICT(profile_id, tag, source) DO UPDATE SET
+      weight    = ?,
+      last_seen = CURRENT_TIMESTAMP
+  `).run(profileId, tag, weight, weight);
+}
+
+function deleteParentInterests(profileId) {
+  getDb().prepare(
+    `DELETE FROM profile_interests WHERE profile_id = ? AND source = 'parent'`
+  ).run(profileId);
+}
+
+function applyDecayToProfile(profileId, today) {
+  getDb().prepare(`
+    UPDATE profile_interests
+    SET weight = MAX(0.0, weight * 0.85)
+    WHERE profile_id = ?
+      AND source = 'behavior'
+      AND DATE(last_seen) != ?
+  `).run(profileId, today);
+}
+
+function profileHadSessionToday(profileId, today) {
+  const row = getDb().prepare(`
+    SELECT COUNT(*) as count FROM watch_history
+    WHERE profile_id = ? AND DATE(watched_at) = ?
+  `).get(profileId, today);
+  return row.count > 0;
+}
+
+// --- Profile insights ---
+
+function insertProfileInsight(profileId, insight, source) {
+  getDb().prepare(
+    `INSERT INTO profile_insights (profile_id, insight, source) VALUES (?, ?, ?)`
+  ).run(profileId, insight, source);
+}
+
+function getUnconsolidatedInsights(profileId) {
+  return getDb().prepare(`
+    SELECT insight, source, created_at
+    FROM profile_insights
+    WHERE profile_id = ? AND consolidated = 0
+    ORDER BY created_at ASC
+  `).all(profileId);
+}
+
+function markInsightsConsolidated(profileId) {
+  getDb().prepare(
+    `UPDATE profile_insights SET consolidated = 1 WHERE profile_id = ? AND consolidated = 0`
+  ).run(profileId);
+}
+
+// --- Child profiles ---
+
+function getChildProfile(profileId) {
+  return getDb().prepare(
+    `SELECT * FROM child_profiles WHERE profile_id = ?`
+  ).get(profileId);
+}
+
+function saveChildProfile(profileId, markdown, updatedBy = 'parent') {
+  getDb().prepare(`
+    INSERT INTO child_profiles (profile_id, markdown, updated_at, updated_by)
+    VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+    ON CONFLICT(profile_id) DO UPDATE SET
+      markdown   = excluded.markdown,
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = excluded.updated_by
+  `).run(profileId, markdown, updatedBy);
+}
+
+function getTagStatsByDay(profileId, dateStr) {
+  return getDb().prepare(`
+    SELECT vt.tag,
+      COUNT(*) as total,
+      SUM(CASE WHEN CAST(wh.progress_seconds AS REAL) / NULLIF(wh.duration_seconds, 0) >= 0.8 THEN 1 ELSE 0 END) as completed,
+      AVG(CAST(wh.progress_seconds AS REAL) / NULLIF(wh.duration_seconds, 0)) as avg_completion
+    FROM watch_history wh
+    JOIN video_tags vt ON wh.video_id = vt.video_id
+    WHERE wh.profile_id = ? AND DATE(wh.watched_at) = ?
+    GROUP BY vt.tag
+    ORDER BY total DESC
+  `).all(profileId, dateStr);
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -524,5 +681,18 @@ module.exports = {
   createCronRun,
   finishCronRun,
   getLastCronRun,
-  getStats
+  getStats,
+  insertVideoTags,
+  getVideoTags,
+  upsertProfileInterest,
+  setParentInterest,
+  deleteParentInterests,
+  applyDecayToProfile,
+  profileHadSessionToday,
+  insertProfileInsight,
+  getUnconsolidatedInsights,
+  markInsightsConsolidated,
+  getChildProfile,
+  saveChildProfile,
+  getTagStatsByDay,
 };
