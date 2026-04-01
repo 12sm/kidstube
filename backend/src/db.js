@@ -433,6 +433,39 @@ function getRejectedVideos(limit = 50) {
   `).all(limit);
 }
 
+function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '' } = {}) {
+  const rawDb = getDb();
+  const conditions = [];
+  const params = [];
+
+  if (status !== 'all') {
+    conditions.push('v.status = ?');
+    params.push(status);
+  }
+  if (search) {
+    conditions.push('(v.title LIKE ? OR v.channel_name LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const { n: total } = rawDb.prepare(`SELECT COUNT(*) as n FROM videos v ${where}`).get(...params);
+
+  const videos = rawDb.prepare(`
+    SELECT v.video_id, v.title, v.channel_id, v.channel_name, v.thumbnail_url,
+           v.duration_seconds, v.published_at, v.processed_at, v.status, v.rejection_reason,
+           GROUP_CONCAT(vt.tag, ', ') as tags
+    FROM videos v
+    LEFT JOIN video_tags vt ON v.video_id = vt.video_id
+    ${where}
+    GROUP BY v.video_id
+    ORDER BY v.published_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, page * limit);
+
+  return { videos, total, page, pages: Math.ceil(total / limit) };
+}
+
 function getApprovedVideosForRelated(profileId, limit = 50) {
   const channels = getWhitelistedChannels(profileId);
   if (channels.length === 0) return [];
@@ -785,6 +818,7 @@ module.exports = {
   getVideoById,
   getPendingVideos,
   getRejectedVideos,
+  getVideoLibrary,
   getApprovedVideosForRelated,
   upsertWatchHistory,
   getWatchHistory,

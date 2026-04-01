@@ -189,6 +189,193 @@ function ChannelRecommendations({ profileId, profileName }) {
   );
 }
 
+function formatDuration(s) {
+  if (!s) return '';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function VideoLibrary() {
+  const [status,  setStatus]  = useState('all');
+  const [search,  setSearch]  = useState('');
+  const [query,   setQuery]   = useState('');   // debounced search sent to API
+  const [page,    setPage]    = useState(0);
+  const [data,    setData]    = useState(null); // { videos, total, pages }
+  const [loading, setLoading] = useState(false);
+  const [acting,  setActing]  = useState(null); // videoId being flipped
+  const searchTimer = useRef(null);
+
+  // Debounce search input → query
+  const handleSearch = (val) => {
+    setSearch(val);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { setQuery(val); setPage(0); }, 350);
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams({ status, page, limit: 25 });
+    if (query) params.set('search', query);
+    fetch(`/api/admin/library?${params}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [status, page, query]);
+
+  const flip = async (videoId, currentStatus) => {
+    setActing(videoId);
+    const action = currentStatus === 'approved' ? 'reject' : 'approve';
+    await fetch(`/api/admin/override/${videoId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ action })
+    });
+    // Update inline without refetch
+    setData(prev => ({
+      ...prev,
+      videos: prev.videos.map(v =>
+        v.video_id === videoId
+          ? { ...v, status: action === 'approve' ? 'approved' : 'rejected', rejection_reason: action === 'approve' ? null : 'Manual override' }
+          : v
+      )
+    }));
+    setActing(null);
+  };
+
+  const statusTabs = [
+    { key: 'all',      label: 'All' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'rejected', label: 'Rejected' },
+  ];
+
+  return (
+    <div className="p-6 space-y-4">
+      {/* Header + search */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h2 className="text-xl font-semibold text-yt-text">Video Library</h2>
+        <input
+          type="text"
+          placeholder="Search title or channel..."
+          value={search}
+          onChange={e => handleSearch(e.target.value)}
+          className="w-64 bg-yt-card border border-yt-border rounded-lg px-4 py-2 text-yt-text focus:outline-none focus:border-blue-500 text-sm"
+        />
+      </div>
+
+      {/* Status tabs */}
+      <div className="flex gap-1">
+        {statusTabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => { setStatus(t.key); setPage(0); }}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              status === t.key ? 'bg-blue-600 text-white' : 'bg-yt-card text-yt-muted hover:text-yt-text'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+        {data && <span className="ml-2 self-center text-yt-muted text-xs">{data.total.toLocaleString()} videos</span>}
+      </div>
+
+      {/* Video list */}
+      {loading && <p className="text-yt-muted text-sm">Loading...</p>}
+
+      {!loading && data && data.videos.length === 0 && (
+        <p className="text-yt-muted text-sm">No videos found.</p>
+      )}
+
+      {!loading && data && data.videos.length > 0 && (
+        <div className="space-y-2">
+          {data.videos.map(v => (
+            <div key={v.video_id} className="bg-yt-surface border border-yt-border rounded-lg p-3 flex gap-3 items-start">
+              {/* Thumbnail */}
+              {v.thumbnail_url
+                ? <img src={v.thumbnail_url} alt="" className="w-24 h-14 object-cover rounded flex-shrink-0" />
+                : <div className="w-24 h-14 bg-yt-card rounded flex-shrink-0" />
+              }
+
+              {/* Info */}
+              <div className="flex-1 min-w-0 space-y-1">
+                <a
+                  href={`https://www.youtube.com/watch?v=${v.video_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-yt-text text-sm font-medium hover:text-blue-400 transition-colors line-clamp-2 leading-snug"
+                >
+                  {v.title}
+                </a>
+                <div className="flex items-center gap-2 flex-wrap text-xs text-yt-muted">
+                  <span>{v.channel_name}</span>
+                  {v.duration_seconds > 0 && <span>{formatDuration(v.duration_seconds)}</span>}
+                  {v.published_at && <span>{new Date(v.published_at).toLocaleDateString()}</span>}
+                </div>
+                {v.tags && (
+                  <div className="flex gap-1 flex-wrap">
+                    {v.tags.split(', ').map(tag => (
+                      <span key={tag} className="text-xs bg-yt-card text-yt-muted px-1.5 py-0.5 rounded">{tag}</span>
+                    ))}
+                  </div>
+                )}
+                {v.rejection_reason && (
+                  <p className="text-xs text-red-400 truncate">{v.rejection_reason}</p>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  v.status === 'approved'
+                    ? 'bg-green-900/40 text-green-400 border border-green-700'
+                    : 'bg-red-900/40 text-red-400 border border-red-700'
+                }`}>
+                  {v.status}
+                </span>
+                <button
+                  onClick={() => flip(v.video_id, v.status)}
+                  disabled={acting === v.video_id}
+                  className={`text-xs px-3 py-1 rounded font-medium disabled:opacity-50 transition-colors ${
+                    v.status === 'approved'
+                      ? 'bg-yt-card text-yt-muted hover:bg-red-900/40 hover:text-red-400 border border-yt-border'
+                      : 'bg-yt-card text-yt-muted hover:bg-green-900/40 hover:text-green-400 border border-yt-border'
+                  }`}
+                >
+                  {acting === v.video_id ? '...' : v.status === 'approved' ? 'Reject' : 'Approve'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {data && data.pages > 1 && (
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="px-3 py-1 rounded bg-yt-card text-yt-muted hover:text-yt-text disabled:opacity-40 text-sm"
+          >
+            ← Prev
+          </button>
+          <span className="text-yt-muted text-sm">
+            Page {page + 1} of {data.pages}
+          </span>
+          <button
+            onClick={() => setPage(p => Math.min(data.pages - 1, p + 1))}
+            disabled={page >= data.pages - 1}
+            className="px-3 py-1 rounded bg-yt-card text-yt-muted hover:text-yt-text disabled:opacity-40 text-sm"
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -1057,6 +1244,7 @@ export default function Admin() {
     { path: '/admin', label: 'Dashboard', exact: true },
     { path: '/admin/profiles', label: 'Profiles' },
     { path: '/admin/channels', label: 'Channels' },
+    { path: '/admin/library', label: 'Library' },
     { path: '/admin/rules', label: 'Filter Rules' },
     { path: '/admin/log', label: 'Filter Log' }
   ];
@@ -1082,6 +1270,7 @@ export default function Admin() {
         <Route index element={<AdminDashboard />} />
         <Route path="profiles" element={<ProfileSetup />} />
         <Route path="channels" element={<ChannelManager />} />
+        <Route path="library" element={<VideoLibrary />} />
         <Route path="rules" element={<FilterRules />} />
         <Route path="log" element={<FilterLog />} />
       </Routes>
