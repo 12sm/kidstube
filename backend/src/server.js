@@ -516,6 +516,27 @@ app.get('/api/admin/insights/:profileId', requireAdmin, (req, res) => {
   res.json({ insights });
 });
 
+// Channel recommendations
+app.get('/api/admin/channel-recommendations/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId, 10);
+  const recs = db.getChannelRecommendations(profileId);
+  res.json(recs);
+});
+
+app.post('/api/admin/channel-recommendations/:profileId/:channelId/apply', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId, 10);
+  const { channelId } = req.params;
+  db.applyChannelRecommendation(channelId, profileId);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/channel-recommendations/:profileId/:channelId/dismiss', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId, 10);
+  const { channelId } = req.params;
+  db.dismissChannelRecommendation(channelId, profileId);
+  res.json({ ok: true });
+});
+
 // ── Start server ──────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`KidsTube backend running on port ${PORT}`);

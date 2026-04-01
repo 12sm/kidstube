@@ -44,6 +44,7 @@ function teardownTestDb(db) {
   db.getDb().prepare('DELETE FROM child_profiles').run();
   db.getDb().prepare('DELETE FROM video_tags').run();
   db.getDb().prepare('DELETE FROM watch_history').run();
+  db.getDb().prepare('DELETE FROM channel_recommendations').run();
   db.getDb().prepare('DELETE FROM filter_rules').run();
   db.getDb().prepare('DELETE FROM videos').run();
   db.getDb().prepare('DELETE FROM channels').run();
