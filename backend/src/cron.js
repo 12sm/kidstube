@@ -54,6 +54,42 @@ async function runNightlyJob() {
         await processVideo(video, filterRules, stats, false, null, llmState);
       }
 
+      // Step 4b: Backfill brand-new channels via YouTube API
+      // Channels with zero videos of any status have never been processed — pull their
+      // 50 most recent uploads to seed the library. Capped at 30 channels per profile
+      // per run so a single Manual Refresh doesn't become a multi-hour job.
+      // videoExists() deduplicates so already-known videos are skipped.
+      const rawDb = db.getDb();
+      const channelIds = channels.map(c => c.channel_id);
+      const ph = channelIds.map(() => '?').join(',');
+      const existingRows = channelIds.length > 0
+        ? rawDb.prepare(`SELECT channel_id FROM videos WHERE channel_id IN (${ph}) GROUP BY channel_id`).all(...channelIds)
+        : [];
+      const hasVideos = new Set(existingRows.map(r => r.channel_id));
+      const newChannels = channels.filter(c => !hasVideos.has(c.channel_id)).slice(0, 30);
+      if (newChannels.length > 0) {
+        console.log(`[Cron] Backfilling ${newChannels.length} brand-new channels via YouTube API`);
+        for (const channel of newChannels) {
+          try {
+            const apiVideos = await youtube.getChannelRecentVideos(channel.channel_id, 50);
+            let queued = 0;
+            for (const v of apiVideos) {
+              if (db.videoExists(v.video_id)) continue;
+              v._profileId = profile.id;
+              v.channel_thumbnail = channel.thumbnail_url;
+              await processVideo(v, filterRules, stats, false, null, llmState);
+              queued++;
+            }
+            if (queued > 0) {
+              console.log(`[Cron] Backfill: ${queued} new videos from ${channel.channel_name}`);
+            }
+          } catch (err) {
+            console.error(`[Cron] Backfill failed for ${channel.channel_name}:`, err.message);
+          }
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
       // Step 5: Fetch related videos for newly approved videos (Phase 2 enhancement)
       // Get recently approved videos that don't have related content yet
       const approvedForRelated = db.getApprovedVideosForRelated(profile.id, 20);
@@ -74,6 +110,32 @@ async function runNightlyJob() {
           console.error(`[Cron] Related fetch failed for ${approvedVideo.video_id}:`, err.message);
         }
         await new Promise(r => setTimeout(r, 300));
+      }
+    }
+
+    // Step 6: LLM review of search-imported videos (needs_llm_review = 1)
+    const pendingReview = db.getDb().prepare(`
+      SELECT video_id, title, description, transcript, duration_seconds, channel_id
+      FROM videos WHERE status = 'approved' AND needs_llm_review = 1
+    `).all();
+
+    if (pendingReview.length > 0) {
+      console.log(`[Cron] LLM-reviewing ${pendingReview.length} search-imported videos`);
+      for (const video of pendingReview) {
+        try {
+          const result = await runLlmCheck(video, { childProfile: null });
+          if (result.approved) {
+            if (result.tags && result.tags.length > 0) db.insertVideoTags(video.video_id, result.tags);
+            db.getDb().prepare('UPDATE videos SET needs_llm_review = 0 WHERE video_id = ?').run(video.video_id);
+          } else {
+            db.updateVideoStatus(video.video_id, 'rejected', `LLM: ${result.reason || 'inappropriate content'}`);
+            db.getDb().prepare('UPDATE videos SET needs_llm_review = 0 WHERE video_id = ?').run(video.video_id);
+            stats.rejected++;
+          }
+        } catch (err) {
+          console.error(`[Cron] LLM review failed for ${video.video_id}:`, err.message);
+        }
+        await new Promise(r => setTimeout(r, 1200));
       }
     }
 
@@ -112,9 +174,14 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     source_video_id: sourceVideoId || null
   });
 
-  // Pass 0a: Shorts detection on RSS metadata
+  // Pass 0a: Shorts / live detection on RSS metadata
   if (filter.isShort(videoData)) {
     db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
+    stats.rejected++;
+    return;
+  }
+  if (filter.isLive(videoData)) {
+    db.updateVideoStatus(videoId, 'rejected', 'YouTube Live');
     stats.rejected++;
     return;
   }
@@ -168,9 +235,14 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     );
   }
 
-  // Pass 0b: Shorts detection on full yt-dlp data (aspect ratio, is_short flag)
+  // Pass 0b: Shorts / live detection on full yt-dlp data (aspect ratio, is_short, was_live flags)
   if (fullData && filter.isShort(fullData)) {
     db.updateVideoStatus(videoId, 'rejected', 'YouTube Short');
+    stats.rejected++;
+    return;
+  }
+  if (fullData && filter.isLive(fullData)) {
+    db.updateVideoStatus(videoId, 'rejected', 'YouTube Live');
     stats.rejected++;
     return;
   }

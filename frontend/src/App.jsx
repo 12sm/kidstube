@@ -9,6 +9,7 @@ import Watch        from './pages/Watch.jsx';
 import Library      from './pages/Library.jsx';
 import History      from './pages/History.jsx';
 import Admin        from './pages/Admin.jsx';
+import Search       from './pages/Search.jsx';
 import MiniPlayer   from './components/MiniPlayer.jsx';
 import { PlayerProvider } from './contexts/PlayerContext.jsx';
 
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="/watch/:videoId"     element={<Watch />} />
             <Route path="/library"            element={<Library />} />
             <Route path="/library/history"   element={<History />} />
+            <Route path="/search"            element={<Search />} />
             <Route path="/admin/*"            element={<Admin />} />
             <Route path="*"                  element={<Navigate to="/" replace />} />
           </Routes>

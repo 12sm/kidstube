@@ -8,6 +8,7 @@ const db = require('./db');
 const auth = require('./auth');
 const cron = require('./cron');
 const youtube = require('./youtube');
+const filter = require('./filter');
 const recommendations = require('./recommendations');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
@@ -255,6 +256,71 @@ app.post('/api/admin/video/:videoId/react', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Search ───────────────────────────────────────────────────────────────────
+
+app.get('/api/search', async (req, res) => {
+  const q         = (req.query.q || '').trim();
+  const profileId = parseInt(req.query.profile_id);
+  if (!q || !profileId) return res.status(400).json({ error: 'Missing q or profile_id' });
+
+  // Save to search history
+  db.saveSearchQuery(profileId, q);
+
+  // 1. Search approved library
+  const dbResults = db.searchApprovedVideos(profileId, q);
+
+  // 2. If sparse, supplement with YouTube API
+  let apiResults = [];
+  if (dbResults.length < 5) {
+    const channels    = db.getWhitelistedChannels(profileId);
+    const channelIds  = channels.map(c => c.channel_id);
+    const filterRules = db.getFilterRules(profileId);
+    const apiVideos   = await youtube.searchVideos(q, channelIds, 20);
+
+    for (const video of apiVideos) {
+      if (db.videoExists(video.video_id)) continue;
+      if (filter.isShort(video) || filter.isLive(video)) continue;
+      const filterResult = filter.runFilterPass(video, filterRules);
+      if (filterResult.rejected) continue;
+
+      db.insertVideo({
+        ...video,
+        transcript:       null,
+        channel_thumbnail: null,
+        status:           'approved',
+        is_recommended:   0,
+        source_video_id:  null,
+        view_count:       null,
+        needs_llm_review: 1,
+      });
+      apiResults.push(video);
+    }
+  }
+
+  // Merge: DB hits first, then newly imported API hits, deduped
+  const seen = new Set(dbResults.map(v => v.video_id));
+  const merged = [
+    ...dbResults,
+    ...apiResults.filter(v => !seen.has(v.video_id)),
+  ];
+
+  res.json({ results: merged });
+});
+
+app.get('/api/search/history', (req, res) => {
+  const profileId = parseInt(req.query.profile_id);
+  if (!profileId) return res.status(400).json({ error: 'Missing profile_id' });
+  const history = db.getSearchHistory(profileId);
+  res.json({ history });
+});
+
+app.delete('/api/search/history/:profileId/:query', (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const query     = decodeURIComponent(req.params.query);
+  db.deleteSearchQuery(profileId, query);
+  res.json({ ok: true });
+});
+
 // ── Admin API Routes (protected) ─────────────────────────────────────────────
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
@@ -262,11 +328,12 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/library', requireAdmin, (req, res) => {
-  const status = ['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'all';
-  const page   = Math.max(0, parseInt(req.query.page)  || 0);
-  const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit) || 25));
-  const search = (req.query.search || '').trim();
-  res.json(db.getVideoLibrary({ status, page, limit, search }));
+  const status    = ['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'all';
+  const page      = Math.max(0, parseInt(req.query.page)  || 0);
+  const limit     = Math.min(50, Math.max(1, parseInt(req.query.limit) || 25));
+  const search    = (req.query.search || '').trim();
+  const profileId = req.query.profile_id ? parseInt(req.query.profile_id, 10) : null;
+  res.json(db.getVideoLibrary({ status, page, limit, search, profileId }));
 });
 
 app.get('/api/admin/filter-log', requireAdmin, (req, res) => {

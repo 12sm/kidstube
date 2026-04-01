@@ -55,8 +55,6 @@ export default function Home() {
   const [hasMore, setHasMore]               = useState(true);
   const [loading, setLoading]               = useState(false);
   const [initialLoad, setInitialLoad]       = useState(true);
-  const [searchOpen, setSearchOpen]         = useState(false);
-  const [searchQuery, setSearchQuery]       = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
   const [watchHistoryMap, setWatchHistoryMap] = useState({});
   const [pullY, setPullY]                   = useState(0);
@@ -65,7 +63,6 @@ export default function Home() {
   const isPulling      = useRef(false);
   const refreshingRef  = useRef(false);   // readable inside passive:false listeners
   const pullYRef       = useRef(0);       // ditto
-  const searchInputRef = useRef(null);
   const loaderRef      = useRef(null);
 
   useEffect(() => {
@@ -114,9 +111,6 @@ export default function Home() {
     if (loaderRef.current) observer.observe(loaderRef.current);
     return () => observer.disconnect();
   }, [loadFeed, hasMore, loading]);
-
-  const openSearch = () => { setSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50); };
-  const closeSearch = () => { setSearchOpen(false); setSearchQuery(''); };
 
   // Cross-platform haptic: vibrate API on Android, silent AudioContext click on iOS
   const haptic = (style = 'light') => {
@@ -196,11 +190,7 @@ export default function Home() {
   const avatarColor = AVATAR_COLORS[(parseInt(profileId) - 1) % AVATAR_COLORS.length];
   const allVideos   = interleaveRecommended(videos);
 
-  const displayVideos = allVideos.filter(v => {
-    const matchesSearch   = !searchQuery.trim() || v.title?.toLowerCase().includes(searchQuery.toLowerCase()) || v.channel_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = videoMatchesCategory(v, activeCategory);
-    return matchesSearch && matchesCategory;
-  });
+  const displayVideos = allVideos.filter(v => videoMatchesCategory(v, activeCategory));
 
   return (
     <div className="min-h-screen bg-yt-bg pb-20">
@@ -218,71 +208,46 @@ export default function Home() {
       <div className="sticky top-0 z-10 bg-yt-bg/95 backdrop-blur-sm" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         {/* Top bar */}
         <div className="px-4 py-2.5 lg:py-3 flex items-center justify-between">
-          {searchOpen ? (
-            <div className="flex items-center gap-2 w-full">
-              <button onClick={closeSearch} className="text-yt-muted hover:text-yt-text transition-colors flex-shrink-0">
-                <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-              </button>
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search videos..."
-                className="flex-1 bg-yt-card text-yt-text placeholder-yt-muted text-sm rounded-full px-4 py-2 outline-none border border-yt-border focus:border-yt-muted transition-colors"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="text-yt-muted hover:text-yt-text flex-shrink-0">
-                  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {/* Logo — icon only, no text */}
-              <div className="flex items-center">
-                <svg viewBox="0 0 28 20" className="h-5 lg:h-6 w-auto" xmlns="http://www.w3.org/2000/svg">
-                  <path fill="#FF0000" d="M27.97 3.45s-.27-1.9-1.1-2.74C25.82.61 24.64.61 24.1.54 20.17-.02 14 0 14 0S7.83-.02 3.9.54C3.36.61 2.18.61 1.13 1.71.3 2.55.03 4.45.03 4.45S-.24 6.65-.24 8.85v2.05c0 2.2.27 4.4.27 4.4s.27 1.9 1.1 2.74c1.05 1.1 2.43 1.07 3.04 1.18C6.17 19.4 14 19.5 14 19.5s6.17-.1 10.1-.63c.54-.07 1.72-.07 2.77-1.17.83-.84 1.1-2.74 1.1-2.74s.27-2.2.27-4.4V7.85c0-2.2-.27-4.4-.27-4.4zM11.12 13.5V5.88l7.46 3.82-7.46 3.8z"/>
-                </svg>
-                <span className="ml-1.5 text-yt-text font-bold text-sm lg:text-base tracking-tight">YouTube</span>
-              </div>
+          {/* Logo */}
+          <div className="flex items-center">
+            <svg viewBox="0 0 28 20" className="h-5 lg:h-6 w-auto" xmlns="http://www.w3.org/2000/svg">
+              <path fill="#FF0000" d="M27.97 3.45s-.27-1.9-1.1-2.74C25.82.61 24.64.61 24.1.54 20.17-.02 14 0 14 0S7.83-.02 3.9.54C3.36.61 2.18.61 1.13 1.71.3 2.55.03 4.45.03 4.45S-.24 6.65-.24 8.85v2.05c0 2.2.27 4.4.27 4.4s.27 1.9 1.1 2.74c1.05 1.1 2.43 1.07 3.04 1.18C6.17 19.4 14 19.5 14 19.5s6.17-.1 10.1-.63c.54-.07 1.72-.07 2.77-1.17.83-.84 1.1-2.74 1.1-2.74s.27-2.2.27-4.4V7.85c0-2.2-.27-4.4-.27-4.4zM11.12 13.5V5.88l7.46 3.82-7.46 3.8z"/>
+            </svg>
+            <span className="ml-1.5 text-yt-text font-bold text-sm lg:text-base tracking-tight">YouTube</span>
+          </div>
 
-              {/* Right actions */}
-              <div className="flex items-center gap-3">
-                <button onClick={openSearch} className="text-yt-muted hover:text-yt-text transition-colors" aria-label="Search">
-                  <svg viewBox="0 0 24 24" className="w-6 h-6 lg:w-7 lg:h-7 fill-current"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                </button>
-                <button onClick={() => { clearProfile(); navigate('/'); }} title={`Switch profile (${profileName})`}>
-                  <div
-                    className="w-8 h-8 lg:w-9 lg:h-9 rounded-full flex items-center justify-center text-white text-sm lg:text-base font-bold ring-2 ring-transparent hover:ring-white/30 transition-all"
-                    style={{ backgroundColor: avatarColor }}
-                  >
-                    {profileName?.charAt(0)?.toUpperCase() || '?'}
-                  </div>
-                </button>
+          {/* Right actions */}
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/search')} className="text-yt-muted hover:text-yt-text transition-colors" aria-label="Search">
+              <svg viewBox="0 0 24 24" className="w-6 h-6 lg:w-7 lg:h-7 fill-current"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            </button>
+            <button onClick={() => { clearProfile(); navigate('/'); }} title={`Switch profile (${profileName})`}>
+              <div
+                className="w-8 h-8 lg:w-9 lg:h-9 rounded-full flex items-center justify-center text-white text-sm lg:text-base font-bold ring-2 ring-transparent hover:ring-white/30 transition-all"
+                style={{ backgroundColor: avatarColor }}
+              >
+                {profileName?.charAt(0)?.toUpperCase() || '?'}
               </div>
-            </>
-          )}
+            </button>
+          </div>
         </div>
 
         {/* Category filter chips */}
-        {!searchOpen && (
-          <div className="overflow-x-auto scrollbar-hide flex gap-2 px-3 pb-2.5">
-            {CATEGORIES.map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => selectCategory(cat.id)}
-                className={`flex-shrink-0 px-3 py-1 lg:px-4 lg:py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeCategory === cat.id
-                    ? 'bg-yt-text text-yt-bg'
-                    : 'bg-yt-card text-yt-text hover:bg-yt-hover'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="overflow-x-auto scrollbar-hide flex gap-2 px-3 pb-2.5">
+          {CATEGORIES.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => selectCategory(cat.id)}
+              className={`flex-shrink-0 px-3 py-1 lg:px-4 lg:py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
+                activeCategory === cat.id
+                  ? 'bg-yt-text text-yt-bg'
+                  : 'bg-yt-card text-yt-text hover:bg-yt-hover'
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
 
       </div>
 
@@ -301,19 +266,17 @@ export default function Home() {
         </div>
 
         <div ref={loaderRef} className="py-6 text-center text-yt-muted text-sm">
-          {!initialLoad && loading && !searchQuery && activeCategory === 'all' && (
+          {!initialLoad && loading && activeCategory === 'all' && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 lg:gap-4 md:px-4">
               {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`sk-more-${i}`} />)}
             </div>
           )}
           {!loading && displayVideos.length === 0 && !initialLoad && (
-            searchQuery
-              ? `No results for "${searchQuery}"`
-              : activeCategory !== 'all'
-                ? `No ${CATEGORIES.find(c => c.id === activeCategory)?.label} videos in your feed yet`
-                : 'No videos yet — enable some channels and run a sync.'
+            activeCategory !== 'all'
+              ? `No ${CATEGORIES.find(c => c.id === activeCategory)?.label} videos in your feed yet`
+              : 'No videos yet — enable some channels and run a sync.'
           )}
-          {!loading && !searchQuery && activeCategory === 'all' && !hasMore && videos.length > 0 && "You're all caught up"}
+          {!loading && activeCategory === 'all' && !hasMore && videos.length > 0 && "You're all caught up"}
         </div>
       </div>
 

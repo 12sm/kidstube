@@ -307,6 +307,44 @@ describe('getTagStatsByDay', () => {
   });
 });
 
+// --- search history ---
+describe('search history', () => {
+  test('search_queries table exists after migrate', () => {
+    const row = db.getDb().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='search_queries'").get();
+    expect(row).toBeTruthy();
+  });
+
+  test('needs_llm_review column exists on videos', () => {
+    const row = db.getDb().prepare("SELECT 1 FROM pragma_table_info('videos') WHERE name='needs_llm_review'").get();
+    expect(row).toBeTruthy();
+  });
+
+  test('saveSearchQuery upserts and getSearchHistory returns newest first', () => {
+    seedProfile(db, { id: 1 });
+    db.saveSearchQuery(1, 'bluey');
+    db.saveSearchQuery(1, 'peppa pig');
+    db.saveSearchQuery(1, 'bluey'); // re-searching bluey bumps it to top
+    const history = db.getSearchHistory(1);
+    expect(history[0]).toBe('bluey');
+    expect(history[1]).toBe('peppa pig');
+  });
+
+  test('deleteSearchQuery removes the entry', () => {
+    seedProfile(db, { id: 1 });
+    db.saveSearchQuery(1, 'monster trucks');
+    db.deleteSearchQuery(1, 'monster trucks');
+    const history = db.getSearchHistory(1);
+    expect(history).not.toContain('monster trucks');
+  });
+
+  test('getSearchHistory returns at most 20 entries', () => {
+    seedProfile(db, { id: 1 });
+    for (let i = 0; i < 25; i++) db.saveSearchQuery(1, `query ${i}`);
+    const history = db.getSearchHistory(1);
+    expect(history.length).toBeLessThanOrEqual(20);
+  });
+});
+
 // --- channel_recommendations ---
 describe('channel_recommendations', () => {
   beforeEach(() => {
