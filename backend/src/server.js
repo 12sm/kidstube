@@ -261,6 +261,14 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
   res.json(db.getStats());
 });
 
+app.get('/api/admin/library', requireAdmin, (req, res) => {
+  const status = ['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'all';
+  const page   = Math.max(0, parseInt(req.query.page)  || 0);
+  const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit) || 25));
+  const search = (req.query.search || '').trim();
+  res.json(db.getVideoLibrary({ status, page, limit, search }));
+});
+
 app.get('/api/admin/filter-log', requireAdmin, (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const videos = db.getRejectedVideos(limit);
