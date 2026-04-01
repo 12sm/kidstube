@@ -312,7 +312,14 @@ app.get('/api/admin/channels/all', requireAdmin, (req, res) => {
 app.get('/api/admin/channels/:profileId', requireAdmin, (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const channels = db.getChannelsForProfile(profileId);
-  res.json({ channels });
+  // Attach any pending rec to each channel so the UI can show chips
+  const recRows = db.getAllChannelRecommendations(profileId);
+  const recMap = Object.fromEntries(recRows.map(r => [r.channel_id, r]));
+  const channelsWithRecs = channels.map(ch => ({
+    ...ch,
+    rec: recMap[ch.channel_id] || null
+  }));
+  res.json({ channels: channelsWithRecs });
 });
 
 // Fetch description, subscriber count, @handle for all channels in a profile
