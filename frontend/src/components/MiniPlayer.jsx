@@ -65,7 +65,7 @@ export default function MiniPlayer() {
   const swipeDelta    = useRef(0);
 
   const [muted, setMuted]         = useState(false);
-  const [playing, setPlaying]     = useState(false);
+  const [playing, setPlaying]     = useState(true);
   const playingRef                = useRef(false);
   const [landscape, setLandscape] = useState(() => window.innerWidth > window.innerHeight);
 
@@ -94,8 +94,8 @@ export default function MiniPlayer() {
   // Reset state when video changes, then register for infoDelivery
   useEffect(() => {
     setMuted(false);
-    setPlaying(false);
-    playingRef.current = false;
+    setPlaying(true);
+    playingRef.current = true;
     setCurrentTime(0);
     setDuration(0);
     setDragTime(null);
@@ -252,9 +252,12 @@ export default function MiniPlayer() {
     border: '1px solid rgba(255,255,255,0.1)',
   };
 
+  // autoplay=1 without mute=1 works because WKWebView is configured with
+  // mediaTypesRequiringUserActionForPlayback = [] in CustomViewController.swift.
+  // In browser Safari/Chrome the browser may still block unmuted autoplay — that's acceptable.
   const src =
     `https://www.youtube.com/embed/${videoId}` +
-    `?playsinline=1&rel=0&modestbranding=1&fs=0` +
+    `?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=0` +
     `&cc_load_policy=0&iv_load_policy=3&controls=0&enablejsapi=1`;
 
   // Seek bar progress %

@@ -30,3 +30,9 @@ screenshots/playwright/
 
 # Git worktrees
 .worktrees/
+
+# Capacitor iOS — synced web assets (rebuilt via `npx cap sync`)
+frontend/ios/App/App/public/
+
+# Capacitor iOS — CocoaPods (not used; project uses SPM)
+frontend/ios/App/Pods/
