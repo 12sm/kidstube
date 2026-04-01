@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { usePlayerContext } from '../contexts/PlayerContext.jsx';
 
 const MINI_W  = 192;
@@ -64,8 +65,10 @@ export default function MiniPlayer() {
   const didMinimize   = useRef(false);
   const swipeDelta    = useRef(0);
 
+  const isNative = Capacitor.isNativePlatform();
+
   const [muted, setMuted]         = useState(false);
-  const [playing, setPlaying]     = useState(true);
+  const [playing, setPlaying]     = useState(false);
   const playingRef                = useRef(false);
   const [landscape, setLandscape] = useState(() => window.innerWidth > window.innerHeight);
 
@@ -252,13 +255,14 @@ export default function MiniPlayer() {
     border: '1px solid rgba(255,255,255,0.1)',
   };
 
-  // autoplay=1 without mute=1 works because WKWebView is configured with
-  // mediaTypesRequiringUserActionForPlayback = [] in CustomViewController.swift.
-  // In browser Safari/Chrome the browser may still block unmuted autoplay — that's acceptable.
+  // On native (WKWebView), mute=1 is omitted because WKWebView is configured with
+  // mediaTypesRequiringUserActionForPlayback = [] in CustomViewController.swift, enabling
+  // unmuted autoplay. On browser (Chrome/Safari), mute=1 is required for autoplay to work.
   const src =
     `https://www.youtube.com/embed/${videoId}` +
     `?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=0` +
-    `&cc_load_policy=0&iv_load_policy=3&controls=0&enablejsapi=1`;
+    `&cc_load_policy=0&iv_load_policy=3&controls=0&enablejsapi=1` +
+    (isNative ? '' : '&mute=1');
 
   // Seek bar progress %
   const displayTime = dragTime ?? currentTime;

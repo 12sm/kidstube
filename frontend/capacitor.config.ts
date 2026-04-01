@@ -5,10 +5,9 @@ const config: CapacitorConfig = {
   appName: 'KidsTube',
   webDir: 'dist',
   server: {
-    // Point to the live nginx server so the app always shows the latest frontend.
-    // The iPad must be on the same Wi-Fi as the server at runtime.
-    // Replace this IP with the actual LAN IP of the server running Docker.
-    url: 'http://172.22.165.254:3000',
+    // Point to the live nginx server via Tailscale so the app always shows the latest frontend.
+    // The iPad must be connected to the Tailscale network at runtime.
+    url: 'http://ubuntu.tailb45aee.ts.net:3000',
     cleartext: true, // allow HTTP in WKWebView
   },
   ios: {
