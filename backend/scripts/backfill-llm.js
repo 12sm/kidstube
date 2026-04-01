@@ -38,7 +38,7 @@ async function runBatchA(childProfile) {
 
       if (result.approved) {
         if (result.tags && result.tags.length > 0) {
-          db.insertVideoTags(video.video_id, result.tags.map(t => ({ tag: t, weight: 1.0 })));
+          db.insertVideoTags(video.video_id, result.tags);
           tagged++;
         }
       } else {
@@ -89,7 +89,7 @@ async function runBatchB(childProfile) {
         rawDb.prepare(`UPDATE videos SET status='approved', rejection_reason=NULL WHERE video_id=?`)
           .run(video.video_id);
         if (result.tags && result.tags.length > 0) {
-          db.insertVideoTags(video.video_id, result.tags.map(t => ({ tag: t, weight: 1.0 })));
+          db.insertVideoTags(video.video_id, result.tags);
         }
         approved++;
         console.log(`  FLIP→APPROVED [${video.video_id}] ${(video.title || '').slice(0, 60)}`);
