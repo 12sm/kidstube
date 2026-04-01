@@ -719,12 +719,25 @@ function upsertChannelRecommendation(channelId, profileId, recommendation, reaso
 }
 
 function getChannelRecommendations(profileId) {
+  // Only return actionable recs: ones where the recommendation differs from current state.
+  // (enable + currently disabled) or (disable + currently enabled)
   return getDb().prepare(`
-    SELECT cr.*, c.channel_name, c.thumbnail_url, c.subscriber_count, c.whitelisted
+    SELECT cr.*, c.channel_name, c.thumbnail_url, c.subscriber_count, c.whitelisted, c.custom_url
     FROM channel_recommendations cr
     JOIN channels c ON cr.channel_id = c.channel_id AND cr.profile_id = c.profile_id
     WHERE cr.profile_id = ? AND cr.dismissed = 0 AND cr.applied = 0
+      AND ((cr.recommendation = 'enable'  AND c.whitelisted = 0)
+        OR (cr.recommendation = 'disable' AND c.whitelisted = 1))
     ORDER BY cr.updated_at DESC
+  `).all(profileId);
+}
+
+// Returns ALL recs (including redundant ones) keyed by channel_id — used by channel list chips.
+function getAllChannelRecommendations(profileId) {
+  return getDb().prepare(`
+    SELECT cr.channel_id, cr.recommendation, cr.reason, cr.dismissed, cr.applied
+    FROM channel_recommendations cr
+    WHERE cr.profile_id = ? AND cr.dismissed = 0 AND cr.applied = 0
   `).all(profileId);
 }
 
@@ -802,6 +815,7 @@ module.exports = {
   applyCompletionToInterests,
   upsertChannelRecommendation,
   getChannelRecommendations,
+  getAllChannelRecommendations,
   dismissChannelRecommendation,
   applyChannelRecommendation,
 };

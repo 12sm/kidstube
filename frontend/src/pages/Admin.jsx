@@ -132,7 +132,14 @@ function ChannelRecommendations({ profileId, profileName }) {
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-yt-text font-medium text-sm">{rec.channel_name || rec.channel_id}</span>
+            <a
+              href={rec.custom_url ? `https://www.youtube.com/${rec.custom_url}` : `https://www.youtube.com/channel/${rec.channel_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-yt-text font-medium text-sm hover:text-blue-400 transition-colors"
+            >
+              {rec.channel_name || rec.channel_id}
+            </a>
             <span className="text-yt-muted text-xs">{rec.whitelisted ? 'currently enabled' : 'currently disabled'}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
               {rec.recommendation}
@@ -453,6 +460,7 @@ function ChannelManager() {
   const [profiles, setProfiles] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
   const [channels, setChannels] = useState([]);
+  const [channelFilter, setChannelFilter] = useState('all'); // 'all' | 'enabled' | 'disabled' | 'rec'
   const [addUrl, setAddUrl] = useState('');
   const [addStatus, setAddStatus] = useState('');
   const [enriching, setEnriching] = useState(false);
@@ -572,6 +580,13 @@ function ChannelManager() {
 
   const selectedProfile = profiles.find(p => p.id === selectedProfileId);
 
+  const filteredChannels = channels.filter(ch => {
+    if (channelFilter === 'enabled')  return ch.whitelisted;
+    if (channelFilter === 'disabled') return !ch.whitelisted;
+    if (channelFilter === 'rec')      return !!ch.rec;
+    return true;
+  });
+
   return (
     <div className="p-6 space-y-5">
       {/* Header + profile tabs */}
@@ -601,6 +616,28 @@ function ChannelManager() {
             {enriching ? 'Fetching...' : 'Fetch Details'}
           </button>
         </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {[
+          { key: 'all',      label: `All (${channels.length})` },
+          { key: 'enabled',  label: `Enabled (${channels.filter(c => c.whitelisted).length})` },
+          { key: 'disabled', label: `Disabled (${channels.filter(c => !c.whitelisted).length})` },
+          { key: 'rec',      label: `Has Rec (${channels.filter(c => c.rec).length})` },
+        ].map(f => (
+          <button
+            key={f.key}
+            onClick={() => setChannelFilter(f.key)}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              channelFilter === f.key
+                ? 'bg-blue-600 text-white'
+                : 'bg-yt-card text-yt-muted hover:text-yt-text'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
       {/* Add channel by URL */}
@@ -684,21 +721,35 @@ function ChannelManager() {
         {channels.length === 0 && (
           <p className="text-yt-muted text-sm">No channels yet. Add one above or import from the browser.</p>
         )}
-        {channels.map(ch => (
+        {filteredChannels.length === 0 && channels.length > 0 && (
+          <p className="text-yt-muted text-sm">No channels match this filter.</p>
+        )}
+        {filteredChannels.map(ch => (
           <div key={ch.channel_id} className="bg-yt-surface border border-yt-border rounded-lg px-4 py-3 flex items-start gap-3">
             {ch.thumbnail_url
               ? <img src={ch.thumbnail_url} alt={ch.channel_name} className="w-9 h-9 rounded-full flex-shrink-0 mt-0.5" />
               : <div className="w-9 h-9 rounded-full bg-yt-card flex-shrink-0 mt-0.5" />
             }
             <div className="flex-1 min-w-0">
-              <a
-                href={ytUrl(ch)}
-                target="_blank"
-                rel="noreferrer"
-                className="text-yt-text text-sm font-medium hover:text-blue-400 transition-colors"
-              >
-                {ch.channel_name}
-              </a>
+              <div className="flex items-center gap-2 flex-wrap">
+                <a
+                  href={ytUrl(ch)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-yt-text text-sm font-medium hover:text-blue-400 transition-colors"
+                >
+                  {ch.channel_name}
+                </a>
+                {ch.rec && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    ch.rec.recommendation === 'enable'
+                      ? 'bg-green-900/40 text-green-400 border border-green-700'
+                      : 'bg-red-900/40 text-red-400 border border-red-700'
+                  }`} title={ch.rec.reason}>
+                    rec: {ch.rec.recommendation}
+                  </span>
+                )}
+              </div>
               {(ch.custom_url || ch.subscriber_count) && (
                 <div className="flex items-center gap-2 mt-0.5">
                   {ch.custom_url && (
