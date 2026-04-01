@@ -92,4 +92,36 @@ async function refreshParentInterests(profileId, markdown) {
   }
 }
 
-module.exports = { generateChildProfile, extractParentTags, refreshParentInterests };
+/**
+ * Build a combined child profile string for use as LLM context.
+ * - 0 profiles with content → generic fallback
+ * - 1 profile with content  → returns that profile's markdown directly
+ * - 2 profiles with content → combines with ## Profile: <name> headers
+ *
+ * @param {object} dbModule - the db module reference (must expose getChildProfile and getDb)
+ * @returns {string}
+ */
+function buildCombinedProfile(dbModule) {
+  const PROFILE_IDS = [5, 6]; // Weston, Emery
+  const profiles = [];
+
+  for (const id of PROFILE_IDS) {
+    const row = dbModule.getChildProfile(id);
+    if (row && row.markdown && row.markdown.trim()) {
+      const profileRow = dbModule.getDb().prepare('SELECT name FROM profiles WHERE id = ?').get(id);
+      profiles.push({ name: profileRow ? profileRow.name : `Profile ${id}`, markdown: row.markdown.trim() });
+    }
+  }
+
+  if (profiles.length === 0) {
+    return 'This content is for children ages 7-8. Approve only age-appropriate, educational or entertaining content.';
+  }
+
+  if (profiles.length === 1) {
+    return profiles[0].markdown;
+  }
+
+  return profiles.map(p => `## Profile: ${p.name}\n\n${p.markdown}`).join('\n\n---\n\n');
+}
+
+module.exports = { generateChildProfile, extractParentTags, refreshParentInterests, buildCombinedProfile };
