@@ -796,6 +796,51 @@ function applyChannelRecommendation(channelId, profileId) {
   `).run(channelId, profileId);
 }
 
+// Bulk apply: if channelIds provided applies only those, otherwise applies all actionable pending recs.
+function bulkApplyChannelRecommendations(profileId, channelIds = null) {
+  const rawDb = getDb();
+
+  let recs;
+  if (channelIds && channelIds.length > 0) {
+    const placeholders = channelIds.map(() => '?').join(',');
+    recs = rawDb.prepare(`
+      SELECT cr.channel_id, cr.recommendation
+      FROM channel_recommendations cr
+      JOIN channels c ON cr.channel_id = c.channel_id AND cr.profile_id = c.profile_id
+      WHERE cr.profile_id = ? AND cr.dismissed = 0 AND cr.applied = 0
+        AND cr.channel_id IN (${placeholders})
+    `).all(profileId, ...channelIds);
+  } else {
+    // All actionable (rec ≠ current state)
+    recs = rawDb.prepare(`
+      SELECT cr.channel_id, cr.recommendation
+      FROM channel_recommendations cr
+      JOIN channels c ON cr.channel_id = c.channel_id AND cr.profile_id = c.profile_id
+      WHERE cr.profile_id = ? AND cr.dismissed = 0 AND cr.applied = 0
+        AND ((cr.recommendation = 'enable'  AND c.whitelisted = 0)
+          OR (cr.recommendation = 'disable' AND c.whitelisted = 1))
+    `).all(profileId);
+  }
+
+  if (recs.length === 0) return 0;
+
+  const updateChannel = rawDb.prepare(
+    'UPDATE channels SET whitelisted = ? WHERE channel_id = ? AND profile_id = ?'
+  );
+  const markApplied = rawDb.prepare(
+    'UPDATE channel_recommendations SET applied = 1, updated_at = CURRENT_TIMESTAMP WHERE channel_id = ? AND profile_id = ?'
+  );
+
+  rawDb.transaction(() => {
+    for (const rec of recs) {
+      updateChannel.run(rec.recommendation === 'enable' ? 1 : 0, rec.channel_id, profileId);
+      markApplied.run(rec.channel_id, profileId);
+    }
+  })();
+
+  return recs.length;
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -852,4 +897,5 @@ module.exports = {
   getAllChannelRecommendations,
   dismissChannelRecommendation,
   applyChannelRecommendation,
+  bulkApplyChannelRecommendations,
 };

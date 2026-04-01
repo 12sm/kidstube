@@ -545,6 +545,13 @@ app.post('/api/admin/channel-recommendations/:profileId/:channelId/apply', requi
   res.json({ ok: true });
 });
 
+app.post('/api/admin/channel-recommendations/:profileId/bulk-apply', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId, 10);
+  const channelIds = Array.isArray(req.body.channelIds) ? req.body.channelIds : null;
+  const count = db.bulkApplyChannelRecommendations(profileId, channelIds);
+  res.json({ ok: true, count });
+});
+
 app.post('/api/admin/channel-recommendations/:profileId/:channelId/dismiss', requireAdmin, (req, res) => {
   const profileId = parseInt(req.params.profileId, 10);
   const { channelId } = req.params;
