@@ -152,6 +152,15 @@ function migrate() {
       UNIQUE(channel_id, profile_id)
     );
     CREATE INDEX IF NOT EXISTS idx_channel_recs_profile ON channel_recommendations(profile_id, dismissed, applied);
+
+    CREATE TABLE IF NOT EXISTS search_queries (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+      query       TEXT NOT NULL,
+      searched_at DATETIME NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(profile_id, query)
+    );
+    CREATE INDEX IF NOT EXISTS idx_search_queries_profile ON search_queries(profile_id, searched_at DESC);
   `);
 
   // Fix videos.channel_id FK — channel_id is no longer a unique key in channels after composite-key migration
@@ -228,6 +237,13 @@ function migrate() {
       CREATE INDEX IF NOT EXISTS idx_channels_profile ON channels(profile_id);
     `);
     console.log('Channels table migrated to composite (channel_id, profile_id) key');
+  }
+
+  // Migrate: add needs_llm_review to videos
+  const hasNeedsLlmReview = db.prepare("SELECT 1 FROM pragma_table_info('videos') WHERE name='needs_llm_review'").get();
+  if (!hasNeedsLlmReview) {
+    db.exec('ALTER TABLE videos ADD COLUMN needs_llm_review INTEGER NOT NULL DEFAULT 0');
+    console.log('Videos table: added needs_llm_review column');
   }
 
   console.log('Database migrated successfully');
@@ -308,11 +324,11 @@ function insertVideo(video) {
     INSERT INTO videos
       (video_id, channel_id, channel_name, channel_thumbnail, title, description,
        thumbnail_url, transcript, duration_seconds, published_at,
-       status, is_recommended, source_video_id, view_count)
+       status, is_recommended, source_video_id, view_count, needs_llm_review)
     VALUES
       (@video_id, @channel_id, @channel_name, @channel_thumbnail, @title, @description,
        @thumbnail_url, @transcript, @duration_seconds, @published_at,
-       @status, @is_recommended, @source_video_id, @view_count)
+       @status, @is_recommended, @source_video_id, @view_count, @needs_llm_review)
     ON CONFLICT(video_id) DO UPDATE SET
       title            = COALESCE(excluded.title, title),
       description      = COALESCE(excluded.description, description),
@@ -433,11 +449,15 @@ function getRejectedVideos(limit = 50) {
   `).all(limit);
 }
 
-function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '' } = {}) {
+function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '', profileId = null } = {}) {
   const rawDb = getDb();
   const conditions = [];
   const params = [];
 
+  if (profileId) {
+    conditions.push('v.channel_id IN (SELECT channel_id FROM channels WHERE profile_id = ?)');
+    params.push(profileId);
+  }
   if (status !== 'all') {
     conditions.push('v.status = ?');
     params.push(status);
@@ -454,6 +474,7 @@ function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '' } =
   const videos = rawDb.prepare(`
     SELECT v.video_id, v.title, v.channel_id, v.channel_name, v.thumbnail_url,
            v.duration_seconds, v.published_at, v.processed_at, v.status, v.rejection_reason,
+           v.description,
            GROUP_CONCAT(vt.tag, ', ') as tags
     FROM videos v
     LEFT JOIN video_tags vt ON v.video_id = vt.video_id
@@ -796,7 +817,75 @@ function applyChannelRecommendation(channelId, profileId) {
   `).run(channelId, profileId);
 }
 
+// --- Search queries ---
+
+function saveSearchQuery(profileId, query) {
+  const rawDb = getDb();
+  rawDb.prepare(`
+    INSERT INTO search_queries (profile_id, query, searched_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(profile_id, query) DO UPDATE SET searched_at = datetime('now')
+  `).run(profileId, query);
+
+  // Trim to 20 most recent
+  rawDb.prepare(`
+    DELETE FROM search_queries
+    WHERE profile_id = ?
+      AND id NOT IN (
+        SELECT id FROM search_queries
+        WHERE profile_id = ?
+        ORDER BY searched_at DESC
+        LIMIT 20
+      )
+  `).run(profileId, profileId);
+}
+
+function getSearchHistory(profileId) {
+  return getDb().prepare(`
+    SELECT query FROM search_queries
+    WHERE profile_id = ?
+    ORDER BY searched_at DESC
+    LIMIT 20
+  `).all(profileId).map(r => r.query);
+}
+
+function deleteSearchQuery(profileId, query) {
+  getDb().prepare(
+    'DELETE FROM search_queries WHERE profile_id = ? AND query = ?'
+  ).run(profileId, query);
+}
+
+function searchApprovedVideos(profileId, q) {
+  const like = `%${q}%`;
+  return getDb().prepare(`
+    SELECT v.video_id, v.title, v.channel_id, v.channel_name, v.thumbnail_url,
+           v.duration_seconds, v.published_at
+    FROM videos v
+    WHERE v.status = 'approved'
+      AND v.channel_id IN (
+        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1
+      )
+      AND (v.title LIKE ? OR v.channel_name LIKE ? OR v.description LIKE ?)
+    ORDER BY v.published_at DESC
+    LIMIT 20
+  `).all(profileId, like, like, like);
+}
+
 // Bulk apply: if channelIds provided applies only those, otherwise applies all actionable pending recs.
+function getApprovedVideoCountByChannel(channelIds) {
+  if (!channelIds || channelIds.length === 0) return {};
+  const placeholders = channelIds.map(() => '?').join(', ');
+  const rows = getDb().prepare(`
+    SELECT channel_id, COUNT(*) as n
+    FROM videos
+    WHERE channel_id IN (${placeholders}) AND status = 'approved'
+    GROUP BY channel_id
+  `).all(...channelIds);
+  const map = {};
+  for (const row of rows) map[row.channel_id] = row.n;
+  return map;
+}
+
 function bulkApplyChannelRecommendations(profileId, channelIds = null) {
   const rawDb = getDb();
 
@@ -898,4 +987,9 @@ module.exports = {
   dismissChannelRecommendation,
   applyChannelRecommendation,
   bulkApplyChannelRecommendations,
+  getApprovedVideoCountByChannel,
+  saveSearchQuery,
+  getSearchHistory,
+  deleteSearchQuery,
+  searchApprovedVideos,
 };

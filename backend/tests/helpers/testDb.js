@@ -39,6 +39,7 @@ function seedInterest(db, profileId, tag, weight, source = 'behavior') {
 
 function teardownTestDb(db) {
   // Delete in FK-safe order (children before parents)
+  db.getDb().prepare('DELETE FROM search_queries').run();
   db.getDb().prepare('DELETE FROM profile_interests').run();
   db.getDb().prepare('DELETE FROM profile_insights').run();
   db.getDb().prepare('DELETE FROM child_profiles').run();
