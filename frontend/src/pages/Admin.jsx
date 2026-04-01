@@ -76,9 +76,11 @@ function AdminLogin({ onLogin }) {
 }
 
 function ChannelRecommendations({ profileId, profileName }) {
-  const [recs, setRecs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState(null);
+  const [recs,     setRecs]     = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [acting,   setActing]   = useState(null);  // single channelId being actioned
+  const [bulking,  setBulking]  = useState(false); // bulk operation in flight
+  const [selected, setSelected] = useState(new Set());
 
   async function loadRecs() {
     setLoading(true);
@@ -86,6 +88,7 @@ function ChannelRecommendations({ profileId, profileName }) {
       const res = await fetch(`/api/admin/channel-recommendations/${profileId}`, { credentials: 'include' });
       const data = await res.json();
       setRecs(Array.isArray(data) ? data : []);
+      setSelected(new Set());
     } catch {
       setRecs([]);
     } finally {
@@ -109,24 +112,69 @@ function ChannelRecommendations({ profileId, profileName }) {
     setActing(null);
   }
 
+  async function handleBulkApply(channelIds = null) {
+    setBulking(true);
+    await fetch(`/api/admin/channel-recommendations/${profileId}/bulk-apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ channelIds })
+    });
+    await loadRecs();
+    setBulking(false);
+  }
+
+  const toggleSelect = (channelId) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(channelId) ? next.delete(channelId) : next.add(channelId);
+      return next;
+    });
+  };
+
+  const toggleSelectGroup = (groupRecs) => {
+    const ids = groupRecs.map(r => r.channel_id);
+    const allSelected = ids.every(id => selected.has(id));
+    setSelected(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
+  };
+
   if (loading) return <p className="text-yt-muted text-sm">Loading recommendations...</p>;
   if (recs.length === 0) return (
     <p className="text-yt-muted text-sm">
-      No pending channel recommendations for {profileName}. Run <code className="bg-yt-card px-1 rounded text-xs">node backend/scripts/audit-channels.js</code> to generate them.
+      No pending actionable recommendations for {profileName}.
     </p>
   );
 
   const toEnable  = recs.filter(r => r.recommendation === 'enable');
   const toDisable = recs.filter(r => r.recommendation === 'disable');
+  const selectedArr = [...selected];
+  const busy = bulking || acting !== null;
 
   function RecCard({ rec }) {
     const isActing = acting === rec.channel_id;
+    const isSelected = selected.has(rec.channel_id);
     const badgeClass = rec.recommendation === 'enable'
       ? 'bg-green-900/40 text-green-400 border border-green-700'
       : 'bg-red-900/40 text-red-400 border border-red-700';
 
     return (
-      <div className="flex items-start gap-3 p-3 rounded-lg bg-yt-card border border-yt-border">
+      <div
+        className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+          isSelected ? 'bg-blue-900/20 border-blue-700' : 'bg-yt-card border-yt-border'
+        }`}
+        onClick={() => toggleSelect(rec.channel_id)}
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => {}}
+          onClick={e => e.stopPropagation()}
+          className="mt-1 flex-shrink-0 accent-blue-500"
+        />
         {rec.thumbnail_url && (
           <img src={rec.thumbnail_url} alt="" className="w-10 h-10 rounded-full flex-shrink-0 object-cover" />
         )}
@@ -136,6 +184,7 @@ function ChannelRecommendations({ profileId, profileName }) {
               href={rec.custom_url ? `https://www.youtube.com/${rec.custom_url}` : `https://www.youtube.com/channel/${rec.channel_id}`}
               target="_blank"
               rel="noreferrer"
+              onClick={e => e.stopPropagation()}
               className="text-yt-text font-medium text-sm hover:text-blue-400 transition-colors"
             >
               {rec.channel_name || rec.channel_id}
@@ -147,17 +196,17 @@ function ChannelRecommendations({ profileId, profileName }) {
           </div>
           <p className="text-yt-muted text-xs mt-1">{rec.reason}</p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
           <button
             onClick={() => handleApply(rec.channel_id)}
-            disabled={isActing}
+            disabled={busy || isActing}
             className="text-xs px-3 py-1 rounded bg-yt-red text-white hover:bg-red-600 disabled:opacity-50"
           >
-            Apply
+            {isActing ? '...' : 'Apply'}
           </button>
           <button
             onClick={() => handleDismiss(rec.channel_id)}
-            disabled={isActing}
+            disabled={busy}
             className="text-xs px-3 py-1 rounded bg-yt-surface text-yt-muted hover:text-yt-text border border-yt-border disabled:opacity-50"
           >
             Dismiss
@@ -167,11 +216,71 @@ function ChannelRecommendations({ profileId, profileName }) {
     );
   }
 
+  function GroupHeader({ label, color, group }) {
+    const allSelected = group.every(r => selected.has(r.channel_id));
+    return (
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={() => toggleSelectGroup(group)}
+            className="accent-blue-500"
+          />
+          <h4 className={`text-sm font-medium ${color}`}>{label} ({group.length})</h4>
+        </div>
+        <button
+          onClick={() => handleBulkApply(group.map(r => r.channel_id))}
+          disabled={busy}
+          className="text-xs px-3 py-1 rounded bg-yt-surface text-yt-muted hover:text-yt-text border border-yt-border disabled:opacity-50"
+        >
+          {bulking ? 'Applying...' : `Apply All ${label.split(' ').pop()}`}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
+      {/* Global bulk toolbar — shown when anything is selected */}
+      {selectedArr.length > 0 && (
+        <div className="flex items-center justify-between bg-blue-900/20 border border-blue-700 rounded-lg px-4 py-2">
+          <span className="text-blue-300 text-sm">{selectedArr.length} selected</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleBulkApply(selectedArr)}
+              disabled={busy}
+              className="text-xs px-4 py-1.5 rounded bg-yt-red text-white hover:bg-red-600 font-medium disabled:opacity-50"
+            >
+              {bulking ? 'Applying...' : 'Apply Selected'}
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              disabled={busy}
+              className="text-xs px-3 py-1.5 rounded bg-yt-surface text-yt-muted hover:text-yt-text border border-yt-border disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Apply All button when nothing selected */}
+      {selectedArr.length === 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => handleBulkApply(null)}
+            disabled={busy}
+            className="text-xs px-4 py-1.5 rounded bg-yt-red text-white hover:bg-red-600 font-medium disabled:opacity-50"
+          >
+            {bulking ? 'Applying...' : `Apply All (${recs.length})`}
+          </button>
+        </div>
+      )}
+
       {toEnable.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-green-400 mb-2">Suggested to enable ({toEnable.length})</h4>
+          <GroupHeader label="Suggested to enable" color="text-green-400" group={toEnable} />
           <div className="space-y-2">
             {toEnable.map(r => <RecCard key={r.channel_id} rec={r} />)}
           </div>
@@ -179,7 +288,7 @@ function ChannelRecommendations({ profileId, profileName }) {
       )}
       {toDisable.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-red-400 mb-2">Suggested to disable ({toDisable.length})</h4>
+          <GroupHeader label="Suggested to disable" color="text-red-400" group={toDisable} />
           <div className="space-y-2">
             {toDisable.map(r => <RecCard key={r.channel_id} rec={r} />)}
           </div>
