@@ -138,6 +138,20 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag);
     CREATE INDEX IF NOT EXISTS idx_profile_interests_profile ON profile_interests(profile_id);
     CREATE INDEX IF NOT EXISTS idx_profile_insights_profile ON profile_insights(profile_id, consolidated);
+
+    CREATE TABLE IF NOT EXISTS channel_recommendations (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id     TEXT NOT NULL,
+      profile_id     INTEGER NOT NULL REFERENCES profiles(id),
+      recommendation TEXT NOT NULL,
+      reason         TEXT NOT NULL,
+      dismissed      INTEGER NOT NULL DEFAULT 0,
+      applied        INTEGER NOT NULL DEFAULT 0,
+      created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(channel_id, profile_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_channel_recs_profile ON channel_recommendations(profile_id, dismissed, applied);
   `);
 
   // Fix videos.channel_id FK — channel_id is no longer a unique key in channels after composite-key migration
@@ -195,17 +209,20 @@ function migrate() {
   if (!hasCompositeKey) {
     db.exec(`
       CREATE TABLE channels_new (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel_id    TEXT NOT NULL,
-        profile_id    INTEGER NOT NULL REFERENCES profiles(id),
-        channel_name  TEXT,
-        thumbnail_url TEXT,
-        whitelisted   BOOLEAN DEFAULT 1,
-        last_synced   DATETIME,
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_id       TEXT NOT NULL,
+        profile_id       INTEGER NOT NULL REFERENCES profiles(id),
+        channel_name     TEXT,
+        thumbnail_url    TEXT,
+        whitelisted      BOOLEAN DEFAULT 1,
+        last_synced      DATETIME,
+        description      TEXT,
+        subscriber_count INTEGER,
+        custom_url       TEXT,
         UNIQUE(channel_id, profile_id)
       );
-      INSERT OR IGNORE INTO channels_new (channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced)
-        SELECT channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced FROM channels;
+      INSERT OR IGNORE INTO channels_new (channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced, description, subscriber_count, custom_url)
+        SELECT channel_id, profile_id, channel_name, thumbnail_url, whitelisted, last_synced, description, subscriber_count, custom_url FROM channels;
       DROP TABLE channels;
       ALTER TABLE channels_new RENAME TO channels;
       CREATE INDEX IF NOT EXISTS idx_channels_profile ON channels(profile_id);
@@ -686,6 +703,53 @@ function applyCompletionToInterests(profileId, videoId, progressSeconds, duratio
   }
 }
 
+// --- Channel recommendations ---
+
+function upsertChannelRecommendation(channelId, profileId, recommendation, reason) {
+  getDb().prepare(`
+    INSERT INTO channel_recommendations (channel_id, profile_id, recommendation, reason, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(channel_id, profile_id) DO UPDATE SET
+      recommendation = excluded.recommendation,
+      reason         = excluded.reason,
+      dismissed      = 0,
+      applied        = 0,
+      updated_at     = CURRENT_TIMESTAMP
+  `).run(channelId, profileId, recommendation, reason);
+}
+
+function getChannelRecommendations(profileId) {
+  return getDb().prepare(`
+    SELECT cr.*, c.channel_name, c.thumbnail_url, c.subscriber_count, c.whitelisted
+    FROM channel_recommendations cr
+    JOIN channels c ON cr.channel_id = c.channel_id AND cr.profile_id = c.profile_id
+    WHERE cr.profile_id = ? AND cr.dismissed = 0 AND cr.applied = 0
+    ORDER BY cr.updated_at DESC
+  `).all(profileId);
+}
+
+function dismissChannelRecommendation(channelId, profileId) {
+  getDb().prepare(`
+    UPDATE channel_recommendations SET dismissed = 1, updated_at = CURRENT_TIMESTAMP
+    WHERE channel_id = ? AND profile_id = ?
+  `).run(channelId, profileId);
+}
+
+function applyChannelRecommendation(channelId, profileId) {
+  const rec = getDb().prepare(
+    'SELECT recommendation FROM channel_recommendations WHERE channel_id = ? AND profile_id = ?'
+  ).get(channelId, profileId);
+  if (!rec) return;
+
+  const newWhitelisted = rec.recommendation === 'enable' ? 1 : 0;
+  getDb().prepare('UPDATE channels SET whitelisted = ? WHERE channel_id = ? AND profile_id = ?')
+    .run(newWhitelisted, channelId, profileId);
+  getDb().prepare(`
+    UPDATE channel_recommendations SET applied = 1, updated_at = CURRENT_TIMESTAMP
+    WHERE channel_id = ? AND profile_id = ?
+  `).run(channelId, profileId);
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -736,4 +800,8 @@ module.exports = {
   getTagStatsByDay,
   applyReactionToInterests,
   applyCompletionToInterests,
+  upsertChannelRecommendation,
+  getChannelRecommendations,
+  dismissChannelRecommendation,
+  applyChannelRecommendation,
 };

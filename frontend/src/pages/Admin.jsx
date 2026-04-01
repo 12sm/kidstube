@@ -75,6 +75,113 @@ function AdminLogin({ onLogin }) {
   );
 }
 
+function ChannelRecommendations({ profileId, profileName }) {
+  const [recs, setRecs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState(null);
+
+  async function loadRecs() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/channel-recommendations/${profileId}`, { credentials: 'include' });
+      const data = await res.json();
+      setRecs(Array.isArray(data) ? data : []);
+    } catch {
+      setRecs([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadRecs(); }, [profileId]);
+
+  async function handleApply(channelId) {
+    setActing(channelId);
+    await fetch(`/api/admin/channel-recommendations/${profileId}/${channelId}/apply`, { method: 'POST', credentials: 'include' });
+    await loadRecs();
+    setActing(null);
+  }
+
+  async function handleDismiss(channelId) {
+    setActing(channelId);
+    await fetch(`/api/admin/channel-recommendations/${profileId}/${channelId}/dismiss`, { method: 'POST', credentials: 'include' });
+    await loadRecs();
+    setActing(null);
+  }
+
+  if (loading) return <p className="text-yt-muted text-sm">Loading recommendations...</p>;
+  if (recs.length === 0) return (
+    <p className="text-yt-muted text-sm">
+      No pending channel recommendations for {profileName}. Run <code className="bg-yt-card px-1 rounded text-xs">node backend/scripts/audit-channels.js</code> to generate them.
+    </p>
+  );
+
+  const toEnable  = recs.filter(r => r.recommendation === 'enable');
+  const toDisable = recs.filter(r => r.recommendation === 'disable');
+
+  function RecCard({ rec }) {
+    const isActing = acting === rec.channel_id;
+    const badgeClass = rec.recommendation === 'enable'
+      ? 'bg-green-900/40 text-green-400 border border-green-700'
+      : 'bg-red-900/40 text-red-400 border border-red-700';
+
+    return (
+      <div className="flex items-start gap-3 p-3 rounded-lg bg-yt-card border border-yt-border">
+        {rec.thumbnail_url && (
+          <img src={rec.thumbnail_url} alt="" className="w-10 h-10 rounded-full flex-shrink-0 object-cover" />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-yt-text font-medium text-sm">{rec.channel_name || rec.channel_id}</span>
+            <span className="text-yt-muted text-xs">{rec.whitelisted ? 'currently enabled' : 'currently disabled'}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
+              {rec.recommendation}
+            </span>
+          </div>
+          <p className="text-yt-muted text-xs mt-1">{rec.reason}</p>
+        </div>
+        <div className="flex gap-2 flex-shrink-0">
+          <button
+            onClick={() => handleApply(rec.channel_id)}
+            disabled={isActing}
+            className="text-xs px-3 py-1 rounded bg-yt-red text-white hover:bg-red-600 disabled:opacity-50"
+          >
+            Apply
+          </button>
+          <button
+            onClick={() => handleDismiss(rec.channel_id)}
+            disabled={isActing}
+            className="text-xs px-3 py-1 rounded bg-yt-surface text-yt-muted hover:text-yt-text border border-yt-border disabled:opacity-50"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {toEnable.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium text-green-400 mb-2">Suggested to enable ({toEnable.length})</h4>
+          <div className="space-y-2">
+            {toEnable.map(r => <RecCard key={r.channel_id} rec={r} />)}
+          </div>
+        </div>
+      )}
+      {toDisable.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium text-red-400 mb-2">Suggested to disable ({toDisable.length})</h4>
+          <div className="space-y-2">
+            {toDisable.map(r => <RecCard key={r.channel_id} rec={r} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -146,6 +253,19 @@ function AdminDashboard() {
             <div key={profile.id}>
               <p className="text-yt-muted text-xs uppercase tracking-wider mb-2">{profile.name}</p>
               <ChildProfileSection profile={profile} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Channel Recommendations */}
+      <section>
+        <h2 className="text-lg font-semibold text-yt-text mb-4">Channel Recommendations</h2>
+        <div className="space-y-6">
+          {profiles.map(p => (
+            <div key={p.id} className="bg-yt-surface rounded-xl p-4">
+              <h3 className="text-yt-text font-medium mb-3">{p.name}</h3>
+              <ChannelRecommendations profileId={p.id} profileName={p.name} />
             </div>
           ))}
         </div>

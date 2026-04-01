@@ -306,3 +306,52 @@ describe('getTagStatsByDay', () => {
     expect(stats).toEqual([]);
   });
 });
+
+// --- channel_recommendations ---
+describe('channel_recommendations', () => {
+  beforeEach(() => {
+    db.getDb().prepare('INSERT OR IGNORE INTO profiles (id, name) VALUES (5, ?)').run('Weston');
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?, ?, ?, ?)').run('UCtest1', 5, 'Test Channel', 0);
+  });
+
+  test('upsertChannelRecommendation inserts a new rec', () => {
+    db.upsertChannelRecommendation('UCtest1', 5, 'enable', 'Good STEM content');
+    const recs = db.getChannelRecommendations(5);
+    expect(recs).toHaveLength(1);
+    expect(recs[0].recommendation).toBe('enable');
+    expect(recs[0].reason).toBe('Good STEM content');
+    expect(recs[0].dismissed).toBe(0);
+    expect(recs[0].applied).toBe(0);
+  });
+
+  test('upsertChannelRecommendation updates on re-run', () => {
+    db.upsertChannelRecommendation('UCtest1', 5, 'enable', 'First reason');
+    db.upsertChannelRecommendation('UCtest1', 5, 'disable', 'Updated reason');
+    const recs = db.getChannelRecommendations(5);
+    expect(recs).toHaveLength(1);
+    expect(recs[0].recommendation).toBe('disable');
+    expect(recs[0].reason).toBe('Updated reason');
+  });
+
+  test('getChannelRecommendations excludes dismissed and applied', () => {
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?, ?, ?, ?)').run('UCtest2', 5, 'Dismissed Chan', 0);
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?, ?, ?, ?)').run('UCtest3', 5, 'Applied Chan', 0);
+    db.upsertChannelRecommendation('UCtest1', 5, 'enable', 'Active');
+    db.upsertChannelRecommendation('UCtest2', 5, 'enable', 'Dismissed');
+    db.upsertChannelRecommendation('UCtest3', 5, 'enable', 'Applied');
+    db.dismissChannelRecommendation('UCtest2', 5);
+    db.applyChannelRecommendation('UCtest3', 5);
+    const recs = db.getChannelRecommendations(5);
+    expect(recs).toHaveLength(1);
+    expect(recs[0].channel_id).toBe('UCtest1');
+  });
+
+  test('applyChannelRecommendation flips whitelisted flag', () => {
+    db.upsertChannelRecommendation('UCtest1', 5, 'enable', 'Good content');
+    db.applyChannelRecommendation('UCtest1', 5);
+    const channel = db.getDb().prepare('SELECT whitelisted FROM channels WHERE channel_id=? AND profile_id=?').get('UCtest1', 5);
+    expect(channel.whitelisted).toBe(1);
+    const rec = db.getDb().prepare('SELECT applied FROM channel_recommendations WHERE channel_id=? AND profile_id=?').get('UCtest1', 5);
+    expect(rec.applied).toBe(1);
+  });
+});
