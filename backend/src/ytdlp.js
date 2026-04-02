@@ -133,4 +133,28 @@ function formatDate(uploadDate) {
   return `${uploadDate.slice(0, 4)}-${uploadDate.slice(4, 6)}-${uploadDate.slice(6, 8)}T00:00:00Z`;
 }
 
-module.exports = { fetchVideoData };
+async function getStreamUrl(videoId) {
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const formatSelectors = [
+    'hls*',
+    'best[ext=mp4][height<=720]',
+    'best[height<=720]',
+    'best'
+  ];
+  for (const fmt of formatSelectors) {
+    try {
+      const args = ['--no-warnings', '--no-playlist', '-f', fmt, '-g', '--no-check-certificate', videoUrl];
+      const { stdout } = await runYtDlp(args);
+      const url = stdout.trim().split('\n')[0];
+      if (url && url.startsWith('http')) {
+        const isHls = url.includes('.m3u8') || fmt === 'hls*';
+        return { url, type: isHls ? 'hls' : 'mp4' };
+      }
+    } catch (err) {
+      console.warn(`[stream] Format ${fmt} failed for ${videoId}:`, err.message.slice(0, 100));
+    }
+  }
+  throw new Error(`No playable stream found for ${videoId}`);
+}
+
+module.exports = { fetchVideoData, getStreamUrl };

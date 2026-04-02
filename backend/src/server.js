@@ -13,6 +13,10 @@ const filter = require('./filter');
 const recommendations = require('./recommendations');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
+const { fetchVideoData, getStreamUrl } = require('./ytdlp');
+
+const streamCache = new Map();
+const STREAM_CACHE_TTL_MS = 25 * 60 * 1000;
 
 const crypto = require('crypto');
 
@@ -190,6 +194,26 @@ app.get('/api/video/:videoId', (req, res) => {
   const video = db.getVideoById(videoId);
   if (!video) return res.status(404).json({ error: 'Video not found' });
   res.json({ video });
+});
+
+// Get a direct stream URL for a video (used by Roku channel)
+app.get('/api/stream/:videoId', async (req, res) => {
+  const { videoId } = req.params;
+  if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
+  const cached = streamCache.get(videoId);
+  if (cached && cached.expiresAt > Date.now()) return res.json({ url: cached.url, type: cached.type, cached: true });
+  try {
+    const result = await getStreamUrl(videoId);
+    streamCache.set(videoId, { url: result.url, type: result.type, expiresAt: Date.now() + STREAM_CACHE_TTL_MS });
+    if (streamCache.size > 200) {
+      const now = Date.now();
+      for (const [key, val] of streamCache) { if (val.expiresAt < now) streamCache.delete(key); }
+    }
+    res.json({ url: result.url, type: result.type, cached: false });
+  } catch (err) {
+    console.error(`[stream] Failed for ${videoId}:`, err.message);
+    res.status(502).json({ error: 'Stream unavailable', detail: err.message });
+  }
 });
 
 // ── Watch History Routes ──────────────────────────────────────────────────────

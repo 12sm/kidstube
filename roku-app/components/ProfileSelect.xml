@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="ProfileSelect" extends="Scene">
+    <script type="text/brightscript" uri="pkg:/components/ProfileSelect.brs" />
+    <children>
+        <Rectangle id="background" width="1280" height="720" color="0x1A1A2EFF" />
+        <Label id="title" text="Who's watching?" width="1280" horizAlign="center"
+               translation="[0, 140]" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+        <Rectangle id="westonCard" width="220" height="260" color="0x2D2D5EFF" translation="[290, 260]" focusable="true" />
+        <Label id="westonLabel" text="Weston" width="220" horizAlign="center"
+               translation="[290, 530]" color="0xFFFFFFFF" font="font:MediumBoldSystemFont" />
+        <Rectangle id="emeryCard" width="220" height="260" color="0x2D2D5EFF" translation="[770, 260]" focusable="true" />
+        <Label id="emeryLabel" text="Emery" width="220" horizAlign="center"
+               translation="[770, 530]" color="0xFFFFFFFF" font="font:MediumBoldSystemFont" />
+    </children>
+</component>

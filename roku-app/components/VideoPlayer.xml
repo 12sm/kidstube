@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="VideoPlayer" extends="Group">
+    <interface>
+        <field id="videoId" type="string" />
+        <field id="videoTitle" type="string" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/VideoPlayer.brs" />
+    <children>
+        <Rectangle id="loadingBg" width="1280" height="720" color="0x000000FF" />
+        <Label id="loadingLabel" text="Loading..." width="1280" horizAlign="center"
+               translation="[0, 340]" font="font:MediumSystemFont" color="0xFFFFFFFF" />
+        <Label id="errorLabel" text="" width="1000" horizAlign="center"
+               translation="[140, 340]" font="font:SmallSystemFont" color="0xFF4444FF" visible="false" />
+        <Video id="videoNode" width="1280" height="720" translation="[0, 0]" />
+    </children>
+</component>
