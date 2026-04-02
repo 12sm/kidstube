@@ -1746,7 +1746,7 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-yt-bg">
       {/* Admin nav */}
-      <div className="bg-yt-surface border-b border-yt-border px-4 py-3 flex gap-4 overflow-x-auto scrollbar-hide">
+      <div className="bg-yt-surface border-b border-yt-border px-4 pb-3 flex gap-4 overflow-x-auto scrollbar-hide" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <span className="text-yt-text font-semibold text-sm mr-2 flex-shrink-0">YouTube Admin</span>
         {navItems.map(item => (
           <Link
