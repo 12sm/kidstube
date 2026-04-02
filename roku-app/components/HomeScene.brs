@@ -34,17 +34,27 @@ sub onFeedLoaded()
 end sub
 
 sub onItemSelected()
+    if m.player <> invalid then return
     item = m.videoGrid.content.getChild(m.videoGrid.itemSelected)
     if item = invalid then return
-    player = m.top.getScene().createChild("VideoPlayer")
-    player.videoId = item.videoId
-    player.videoTitle = item.title
-    player.setFocus(true)
+    m.top.visible = false
+    m.player = m.top.getScene().createChild("VideoPlayer")
+    m.player.videoId = item.videoId
+    m.player.videoTitle = item.title
+    m.player.observeField("isDone", "onPlaybackDone")
+    m.player.setFocus(true)
+end sub
+
+sub onPlaybackDone()
+    m.top.getScene().removeChild(m.player)
+    m.player = invalid
+    m.top.visible = true
+    m.videoGrid.setFocus(true)
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if press and key = "back" then
-        m.top.getParent().removeChild(m.top)
+        m.top.isDone = true
         return true
     end if
     return false

@@ -3,6 +3,7 @@
     <interface>
         <field id="videoId" type="string" />
         <field id="videoTitle" type="string" />
+        <field id="isDone" type="boolean" value="false" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/VideoPlayer.brs" />
     <children>

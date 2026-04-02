@@ -3,6 +3,7 @@ sub init()
     m.videoNode.width = 1280
     m.videoNode.height = 720
     m.top.appendChild(m.videoNode)
+    m.loadingBg = m.top.findNode("loadingBg")
     m.loadingLabel = m.top.findNode("loadingLabel")
     m.errorLabel = m.top.findNode("errorLabel")
     m.videoNode.observeField("state", "onPlayerStateChange")
@@ -21,6 +22,7 @@ sub onVideoIdSet()
     if m.top.videoId = invalid then
         return
     end if
+    m.loadingBg.visible = true
     m.loadingLabel.visible = true
     m.errorLabel.visible = false
     m.streamTask = createObject("roSGNode", "FetchTask")
@@ -32,22 +34,30 @@ end sub
 sub onStreamUrlLoaded()
     parsed = ParseJson(m.streamTask.response)
     if parsed = invalid then
+        print "[VideoPlayer] stream response parse failed"
         m.loadingLabel.visible = false
         m.errorLabel.text = "Stream unavailable"
         m.errorLabel.visible = true
         return
     end if
     if parsed.url = invalid then
+        print "[VideoPlayer] stream response missing url"
         m.loadingLabel.visible = false
-        m.errorLabel.text = "Stream unavailable"
+        m.errorLabel.text = "Video unavailable"
         m.errorLabel.visible = true
+        m.dismissTimer = createObject("roSGNode", "Timer")
+        m.dismissTimer.duration = 2
+        m.dismissTimer.repeat = false
+        m.dismissTimer.observeField("fire", "onDismissTimer")
+        m.dismissTimer.control = "start"
         return
     end if
+    print "[VideoPlayer] got stream url type=" parsed.type
     m.loadingLabel.visible = false
     content = createObject("roSGNode", "ContentNode")
     content.url = parsed.url
     content.title = m.top.videoTitle
-    content.streamFormat = "hls"
+    content.streamFormat = parsed.type
     m.videoNode.content = content
     m.videoNode.control = "play"
     m.videoNode.setFocus(true)
@@ -56,15 +66,38 @@ end sub
 
 sub onPlayerStateChange()
     state = m.videoNode.state
+    print "[VideoPlayer] state=" state
+    if state = "playing" then
+        ' Hide all UI so the hardware video plane shows through
+        m.loadingBg.visible = false
+        m.loadingLabel.visible = false
+    end if
     if state = "finished" then
         m.progressTimer.control = "stop"
         reportProgress()
-        m.top.getParent().removeChild(m.top)
+        dismiss()
     end if
     if state = "error" then
         m.progressTimer.control = "stop"
-        m.top.getParent().removeChild(m.top)
+        print "[VideoPlayer] error=" m.videoNode.errorStr
+        m.loadingLabel.visible = false
+        m.errorLabel.text = "Video unavailable"
+        m.errorLabel.visible = true
+        m.dismissTimer = createObject("roSGNode", "Timer")
+        m.dismissTimer.duration = 2
+        m.dismissTimer.repeat = false
+        m.dismissTimer.observeField("fire", "onDismissTimer")
+        m.dismissTimer.control = "start"
     end if
+end sub
+
+sub onDismissTimer()
+    dismiss()
+end sub
+
+sub dismiss()
+    m.videoNode.control = "stop"
+    m.top.isDone = true
 end sub
 
 sub reportProgress()
@@ -94,8 +127,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if key = "back" then
             m.progressTimer.control = "stop"
             reportProgress()
-            m.videoNode.control = "stop"
-            m.top.getParent().removeChild(m.top)
+            dismiss()
             return true
         end if
     end if

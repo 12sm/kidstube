@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <component name="HomeScene" extends="Group">
+    <interface>
+        <field id="isDone" type="boolean" value="false" />
+    </interface>
     <script type="text/brightscript" uri="pkg:/components/HomeScene.brs" />
     <children>
         <Rectangle id="background" width="1280" height="720" color="0x0F0F0FFF" />
@@ -9,6 +12,6 @@
                font="font:SmallSystemFont" color="0xAAAAAAFF" />
         <MarkupGrid id="videoGrid" translation="[60, 90]"
                     itemSize="[280, 210]" itemSpacing="[20, 20]"
-                    numColumns="4" focusable="true" />
+                    numColumns="4" numRows="2" focusable="true" />
     </children>
 </component>
