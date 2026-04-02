@@ -14,6 +14,9 @@ const recommendations = require('./recommendations');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
 const { fetchVideoData, getStreamUrl } = require('./ytdlp');
+const { spawn } = require('child_process');
+const path       = require('path');
+const jobDryRun  = require('./jobDryRun');
 
 const streamCache = new Map();
 const STREAM_CACHE_TTL_MS = 25 * 60 * 1000;
@@ -39,6 +42,24 @@ db.migrate();
 
 // Start cron scheduler
 cron.scheduleJob();
+
+// ── Jobs ─────────────────────────────────────────────────────────────────────
+
+const DRY_RUN_FNS = {
+  'nightly':         jobDryRun.dryRunNightly,
+  'channel-audit':   jobDryRun.dryRunChannelAudit,
+  'backfill-tag':    jobDryRun.dryRunBackfillTag,
+  'backfill-reeval': jobDryRun.dryRunBackfillReeval,
+};
+
+const SCRIPT_MAP = {
+  'nightly':         ['nightly.js'],
+  'channel-audit':   ['audit-channels.js'],
+  'backfill-tag':    ['backfill-llm.js', 'a'],
+  'backfill-reeval': ['backfill-llm.js', 'b'],
+};
+
+let activeJobStream = null;
 
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -199,11 +220,18 @@ app.get('/api/video/:videoId', (req, res) => {
 // Get a direct stream URL for a video (used by Roku channel)
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
+  console.log(`[stream] Request for ${videoId}`);
   if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
   const cached = streamCache.get(videoId);
-  if (cached && cached.expiresAt > Date.now()) return res.json({ url: cached.url, type: cached.type, cached: true });
+  if (cached && cached.expiresAt > Date.now()) {
+    console.log(`[stream] Cache hit for ${videoId}: type=${cached.type}`);
+    return res.json({ url: cached.url, type: cached.type, cached: true });
+  }
   try {
+    console.log(`[stream] Fetching via yt-dlp for ${videoId}...`);
+    const t0 = Date.now();
     const result = await getStreamUrl(videoId);
+    console.log(`[stream] OK ${videoId} in ${Date.now()-t0}ms type=${result.type} url=${result.url.slice(0,80)}`);
     streamCache.set(videoId, { url: result.url, type: result.type, expiresAt: Date.now() + STREAM_CACHE_TTL_MS });
     if (streamCache.size > 200) {
       const now = Date.now();
@@ -489,6 +517,61 @@ app.post('/api/admin/refresh', requireAdmin, async (req, res) => {
   // Run in background after responding
   setImmediate(() => {
     cron.runNightlyJob().catch(err => console.error('Manual refresh error:', err));
+  });
+});
+
+app.post('/api/admin/jobs/:name/dry-run', requireAdmin, (req, res) => {
+  const fn = DRY_RUN_FNS[req.params.name];
+  if (!fn) return res.status(404).json({ error: 'Unknown job' });
+  try {
+    res.json(fn());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/jobs/:name/stream', requireAdmin, (req, res) => {
+  const script = SCRIPT_MAP[req.params.name];
+  if (!script) return res.status(404).json({ error: 'Unknown job' });
+
+  if (activeJobStream) {
+    return res.status(409).json({ error: 'A job is already running' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const scriptPath = path.join(__dirname, '..', 'scripts', script[0]);
+  const args       = script.slice(1);
+  const child      = spawn(process.execPath, [scriptPath, ...args], {
+    env: { ...process.env },
+    cwd: path.join(__dirname, '..'),
+  });
+
+  activeJobStream = child;
+
+  const sendLine = (line) => res.write(`data: ${line}\n\n`);
+
+  child.stdout.on('data', chunk =>
+    chunk.toString().split('\n').filter(Boolean).forEach(sendLine)
+  );
+  child.stderr.on('data', chunk =>
+    chunk.toString().split('\n').filter(Boolean).forEach(sendLine)
+  );
+
+  child.on('close', code => {
+    res.write(`event: done\ndata: ${JSON.stringify({ exitCode: code })}\n\n`);
+    res.end();
+    activeJobStream = null;
+  });
+
+  req.on('close', () => {
+    if (activeJobStream === child) {
+      child.kill();
+      activeJobStream = null;
+    }
   });
 });
 
