@@ -13,13 +13,13 @@ const filter = require('./filter');
 const recommendations = require('./recommendations');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
-const { fetchVideoData, getStreamUrl } = require('./ytdlp');
+const { fetchVideoData } = require('./ytdlp');
+const innertube = require('./innertube');
+const dash = require('./dash');
 const { spawn } = require('child_process');
 const path       = require('path');
 const jobDryRun  = require('./jobDryRun');
 
-const streamCache = new Map();
-const STREAM_CACHE_TTL_MS = 25 * 60 * 1000;
 
 const crypto = require('crypto');
 
@@ -217,30 +217,37 @@ app.get('/api/video/:videoId', (req, res) => {
   res.json({ video });
 });
 
-// Get a direct stream URL for a video (used by Roku channel)
+// Get a DASH manifest URL for a video (used by Roku channel)
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   console.log(`[stream] Request for ${videoId}`);
   if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
-  const cached = streamCache.get(videoId);
-  if (cached && cached.expiresAt > Date.now()) {
-    console.log(`[stream] Cache hit for ${videoId}: type=${cached.type}`);
-    return res.json({ url: cached.url, type: cached.type, cached: true });
-  }
   try {
-    console.log(`[stream] Fetching via yt-dlp for ${videoId}...`);
     const t0 = Date.now();
-    const result = await getStreamUrl(videoId);
-    console.log(`[stream] OK ${videoId} in ${Date.now()-t0}ms type=${result.type} url=${result.url.slice(0,80)}`);
-    streamCache.set(videoId, { url: result.url, type: result.type, expiresAt: Date.now() + STREAM_CACHE_TTL_MS });
-    if (streamCache.size > 200) {
-      const now = Date.now();
-      for (const [key, val] of streamCache) { if (val.expiresAt < now) streamCache.delete(key); }
-    }
-    res.json({ url: result.url, type: result.type, cached: false });
+    await innertube.getStreamInfo(videoId);
+    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms`);
+    const manifestUrl = `http://${req.headers.host}/api/manifest/${videoId}`;
+    res.json({ url: manifestUrl, type: 'dash' });
   } catch (err) {
     console.error(`[stream] Failed for ${videoId}:`, err.message);
     res.status(502).json({ error: 'Stream unavailable', detail: err.message });
+  }
+});
+
+// Serve the DASH manifest for a video (Roku media player fetches this directly)
+app.get('/api/manifest/:videoId', (req, res) => {
+  const { videoId } = req.params;
+  const cached = innertube.getCached(videoId);
+  if (!cached) {
+    return res.status(404).json({ error: 'Stream info not cached — call /api/stream first' });
+  }
+  try {
+    const mpd = dash.buildManifest(cached.formats, cached.durationMs);
+    res.set('Content-Type', 'application/dash+xml');
+    res.send(mpd);
+  } catch (err) {
+    console.error(`[manifest] Build failed for ${videoId}:`, err.message);
+    res.status(500).json({ error: 'Manifest generation failed', detail: err.message });
   }
 });
 
