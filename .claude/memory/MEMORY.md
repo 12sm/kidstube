@@ -68,6 +68,9 @@ See `project_ux_polish_session.md` for full details. Summary of what changed:
 ## Infrastructure Note (Mar 2026)
 Project moved from Mac local dev to Ubuntu dev machine. Repo is now in git.
 
+## Roku Dev Device
+- [roku_device.md](roku_device.md) — IP, username, password for dev sideload uploads
+
 ## Claude Install — Ubuntu Dev Server
 - `claude` binary is at `/home/michael/.local/bin/claude` — not in PATH over non-interactive SSH sessions
 - Fix: use `bash -i -c '...'` to invoke as interactive shell, or just log in directly (PATH loads from `.bashrc`)
