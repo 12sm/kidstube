@@ -763,6 +763,15 @@ function JobsPanel() {
     return () => document.removeEventListener('click', handler);
   }, [openDropdown]);
 
+  useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, []);
+
   const startDryRun = async (jobName) => {
     setOpenDropdown(null);
     const job = JOBS.find(j => j.name === jobName);
@@ -810,11 +819,12 @@ function JobsPanel() {
     });
 
     es.onerror = () => {
-      setLogLines(prev => [...prev, '⚠ Connection lost']);
-      setJobDone({ exitCode: 1 });
-      setActiveJob(null);
-      es.close();
-      esRef.current = null;
+      if (es.readyState === EventSource.CLOSED) {
+        setLogLines(prev => [...prev, '⚠ Connection lost']);
+        setJobDone({ exitCode: 1 });
+        setActiveJob(null);
+        esRef.current = null;
+      }
     };
   };
 
