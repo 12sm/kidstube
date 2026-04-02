@@ -235,6 +235,30 @@ async function searchVideos(query, whitelistedChannelIds, maxResults = 20) {
   }
 }
 
+async function discoverChannels(query) {
+  if (!process.env.YOUTUBE_API_KEY || !query) return [];
+  const yt = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
+  try {
+    const res = await yt.search.list({
+      part: 'snippet',
+      q: query,
+      type: 'channel',
+      maxResults: 10,
+      safeSearch: 'strict',
+    });
+    return (res.data.items || []).map(item => ({
+      channel_id:       item.snippet.channelId,
+      channel_name:     item.snippet.channelTitle,
+      thumbnail_url:    item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || null,
+      description:      item.snippet.description || null,
+      subscriber_count: null, // filled by enrichChannels() after collection
+    }));
+  } catch (err) {
+    console.error('[YouTube] discoverChannels failed:', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   getSubscriptions,
   getVideoMetadata,
@@ -244,4 +268,5 @@ module.exports = {
   resolveChannelByUrl,
   parseTopicCategories,
   searchVideos,
+  discoverChannels,
 };
