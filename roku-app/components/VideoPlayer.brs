@@ -1,5 +1,8 @@
 sub init()
-    m.videoNode = m.top.findNode("videoNode")
+    m.videoNode = createObject("roSGNode", "Video")
+    m.videoNode.width = 1280
+    m.videoNode.height = 720
+    m.top.appendChild(m.videoNode)
     m.loadingLabel = m.top.findNode("loadingLabel")
     m.errorLabel = m.top.findNode("errorLabel")
     m.videoNode.observeField("state", "onPlayerStateChange")
@@ -12,7 +15,12 @@ sub init()
 end sub
 
 sub onVideoIdSet()
-    if m.top.videoId = "" or m.top.videoId = invalid then return
+    if m.top.videoId = "" then
+        return
+    end if
+    if m.top.videoId = invalid then
+        return
+    end if
     m.loadingLabel.visible = true
     m.errorLabel.visible = false
     m.streamTask = createObject("roSGNode", "FetchTask")
@@ -23,7 +31,13 @@ end sub
 
 sub onStreamUrlLoaded()
     parsed = ParseJson(m.streamTask.response)
-    if parsed = invalid or parsed.url = invalid
+    if parsed = invalid then
+        m.loadingLabel.visible = false
+        m.errorLabel.text = "Stream unavailable"
+        m.errorLabel.visible = true
+        return
+    end if
+    if parsed.url = invalid then
         m.loadingLabel.visible = false
         m.errorLabel.text = "Stream unavailable"
         m.errorLabel.visible = true
@@ -33,7 +47,7 @@ sub onStreamUrlLoaded()
     content = createObject("roSGNode", "ContentNode")
     content.url = parsed.url
     content.title = m.top.videoTitle
-    content.streamFormat = parsed.type  ' "hls" or "mp4"
+    content.streamFormat = "hls"
     m.videoNode.content = content
     m.videoNode.control = "play"
     m.videoNode.setFocus(true)
@@ -42,32 +56,48 @@ end sub
 
 sub onPlayerStateChange()
     state = m.videoNode.state
-    if state = "finished" or state = "error"
+    if state = "finished" then
         m.progressTimer.control = "stop"
         reportProgress()
+        m.top.getParent().removeChild(m.top)
+    end if
+    if state = "error" then
+        m.progressTimer.control = "stop"
         m.top.getParent().removeChild(m.top)
     end if
 end sub
 
 sub reportProgress()
-    pos = m.videoNode.position
-    dur = m.videoNode.duration
-    if pos <= 0 or pos = m.lastReportedPosition then return
-    m.lastReportedPosition = pos
-    task = createObject("roSGNode", "FetchTask")
-    task.url = m.global.backendUrl + "/api/watch-history"
-    task.method = "POST"
-    task.body = FormatJson({ profile_id: m.global.profileId, video_id: m.top.videoId, progress_seconds: Int(pos), duration_seconds: Int(dur) })
-    task.control = "RUN"
+    curPos = m.videoNode.position
+    curDur = m.videoNode.duration
+    if curPos <= 0 then
+        return
+    end if
+    if curPos = m.lastReportedPosition then
+        return
+    end if
+    m.lastReportedPosition = curPos
+    reqBody = {}
+    reqBody["profile_id"] = m.global.profileId
+    reqBody["video_id"] = m.top.videoId
+    reqBody["progress_seconds"] = curPos
+    reqBody["duration_seconds"] = curDur
+    httpTask = createObject("roSGNode", "FetchTask")
+    httpTask.url = m.global.backendUrl + "/api/watch-history"
+    httpTask.method = "POST"
+    httpTask.body = FormatJson(reqBody)
+    httpTask.control = "RUN"
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    if press and key = "back"
-        m.progressTimer.control = "stop"
-        reportProgress()
-        m.videoNode.control = "stop"
-        m.top.getParent().removeChild(m.top)
-        return true
+    if press then
+        if key = "back" then
+            m.progressTimer.control = "stop"
+            reportProgress()
+            m.videoNode.control = "stop"
+            m.top.getParent().removeChild(m.top)
+            return true
+        end if
     end if
     return false
 end function

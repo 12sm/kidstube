@@ -43,7 +43,7 @@ sub onItemSelected()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    if press and key = "back"
+    if press and key = "back" then
         m.top.getParent().removeChild(m.top)
         return true
     end if

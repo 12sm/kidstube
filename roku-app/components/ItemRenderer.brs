@@ -15,6 +15,9 @@ sub onContentSet()
 end sub
 
 sub onFocusChange()
-    if m.top.focusPercent > 0.5 then m.top.scale = [1.08, 1.08]
-    else m.top.scale = [1.0, 1.0]
+    if m.top.focusPercent > 0.5 then
+        m.top.scale = [1.08, 1.08]
+    else
+        m.top.scale = [1.0, 1.0]
+    end if
 end sub

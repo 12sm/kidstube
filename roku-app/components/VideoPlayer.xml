@@ -11,6 +11,5 @@
                translation="[0, 340]" font="font:MediumSystemFont" color="0xFFFFFFFF" />
         <Label id="errorLabel" text="" width="1000" horizAlign="center"
                translation="[140, 340]" font="font:SmallSystemFont" color="0xFF4444FF" visible="false" />
-        <Video id="videoNode" width="1280" height="720" translation="[0, 0]" />
     </children>
 </component>

@@ -7,7 +7,7 @@ sub runFetch()
     http.setUrl(m.top.url)
     http.setCertificatesFile("common:/certs/ca-bundle.crt")
     http.InitClientCertificates()
-    if m.top.method = "POST"
+    if m.top.method = "POST" then
         http.setRequest("POST")
         http.addHeader("Content-Type", "application/json")
         m.top.response = http.postFromString(m.top.body)

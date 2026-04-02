@@ -6,17 +6,17 @@ sub init()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    if press
-        if key = "OK"
+    if press then
+        if key = "OK" then
             if m.westonCard.hasFocus() then selectProfile(5, "Weston")
             if m.emeryCard.hasFocus() then selectProfile(6, "Emery")
             return true
-        else if key = "right" and m.westonCard.hasFocus()
+        else if key = "right" and m.westonCard.hasFocus() then
             m.emeryCard.setFocus(true)
             m.emeryCard.color = "0x4A4A8EFF"
             m.westonCard.color = "0x2D2D5EFF"
             return true
-        else if key = "left" and m.emeryCard.hasFocus()
+        else if key = "left" and m.emeryCard.hasFocus() then
             m.westonCard.setFocus(true)
             m.westonCard.color = "0x4A4A8EFF"
             m.emeryCard.color = "0x2D2D5EFF"
