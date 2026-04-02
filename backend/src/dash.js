@@ -19,7 +19,7 @@ function buildManifest(formats, durationMs) {
   const durationSec = (durationMs / 1000).toFixed(3);
 
   const videoFormats = formats
-    .filter(f => f.has_video && !f.has_audio && f.height <= 1080 && f.init_range && f.index_range && f.url)
+    .filter(f => f.has_video && !f.has_audio && f.height <= 1080 && f.init_range?.start != null && f.index_range?.start != null && f.url)
     .sort((a, b) => {
       const rankDiff = codecRank(a.mime_type) - codecRank(b.mime_type);
       if (rankDiff !== 0) return rankDiff;
@@ -39,7 +39,7 @@ function buildManifest(formats, durationMs) {
   if (selectedVideo.length === 0) throw new Error('No usable video formats found');
 
   const audioFormats = formats
-    .filter(f => f.has_audio && !f.has_video && f.init_range && f.index_range && f.url)
+    .filter(f => f.has_audio && !f.has_video && f.init_range?.start != null && f.index_range?.start != null && f.url)
     .sort((a, b) => b.bitrate - a.bitrate);
 
   if (audioFormats.length === 0) throw new Error('No usable audio formats found');

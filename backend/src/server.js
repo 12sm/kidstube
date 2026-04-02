@@ -226,7 +226,7 @@ app.get('/api/stream/:videoId', async (req, res) => {
     const t0 = Date.now();
     await innertube.getStreamInfo(videoId);
     console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms`);
-    const manifestUrl = `http://${req.headers.host}/api/manifest/${videoId}`;
+    const manifestUrl = `${req.protocol}://${req.headers.host}/api/manifest/${videoId}`;
     res.json({ url: manifestUrl, type: 'dash' });
   } catch (err) {
     console.error(`[stream] Failed for ${videoId}:`, err.message);
