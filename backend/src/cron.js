@@ -71,18 +71,12 @@ async function runNightlyJob() {
         console.log(`[Cron] Backfilling ${newChannels.length} brand-new channels via YouTube API`);
         for (const channel of newChannels) {
           try {
-            const apiVideos = await youtube.getChannelRecentVideos(channel.channel_id, 50);
-            let queued = 0;
-            for (const v of apiVideos) {
-              if (db.videoExists(v.video_id)) continue;
-              v._profileId = profile.id;
-              v.channel_thumbnail = channel.thumbnail_url;
-              await processVideo(v, filterRules, stats, false, null, llmState);
-              queued++;
+            const bStats = await backfillChannel(channel, profile.id);
+            if (bStats.approved > 0) {
+              console.log(`[Cron] Backfill: ${bStats.approved} new videos from ${channel.channel_name}`);
             }
-            if (queued > 0) {
-              console.log(`[Cron] Backfill: ${queued} new videos from ${channel.channel_name}`);
-            }
+            stats.approved += bStats.approved;
+            stats.rejected += bStats.rejected;
           } catch (err) {
             console.error(`[Cron] Backfill failed for ${channel.channel_name}:`, err.message);
           }
@@ -287,6 +281,26 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
   stats.approved++;
 }
 
+async function backfillChannel(channel, profileId) {
+  const filterRules = db.getFilterRules(profileId);
+  const llmState    = { calls: 0, cap: 50 };
+  const stats       = { found: 0, approved: 0, rejected: 0, error: null };
+  try {
+    const apiVideos = await youtube.getChannelRecentVideos(channel.channel_id, 50);
+    for (const v of apiVideos) {
+      if (db.videoExists(v.video_id)) continue;
+      v._profileId        = profileId;
+      v.channel_thumbnail = channel.thumbnail_url || null;
+      await processVideo(v, filterRules, stats, false, null, llmState);
+    }
+    console.log(`[Backfill] ${channel.channel_name}: approved=${stats.approved} rejected=${stats.rejected}`);
+  } catch (err) {
+    console.error(`[Backfill] Failed for ${channel.channel_name}:`, err.message);
+    stats.error = err.message;
+  }
+  return stats;
+}
+
 async function syncSubscriptions(profile) {
   // Only sync if we haven't synced recently (check last_synced on channels)
   const existingChannels = db.getChannelsForProfile(profile.id);
@@ -336,4 +350,4 @@ function scheduleJob() {
   });
 }
 
-module.exports = { runNightlyJob, scheduleJob, syncSubscriptions };
+module.exports = { runNightlyJob, scheduleJob, syncSubscriptions, backfillChannel };
