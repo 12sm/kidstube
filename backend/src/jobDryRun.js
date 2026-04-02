@@ -97,7 +97,7 @@ function dryRunBackfillReeval() {
     SELECT COUNT(*) as cnt FROM videos
     WHERE status = 'rejected'
       AND rejection_reason IN (${placeholders})
-  `).get(...SOFT_KEYWORDS.map(k => `Keyword: "${k}"`)).cnt;
+  `).get(SOFT_KEYWORDS.map(k => `Keyword: "${k}"`)).cnt;
 
   const estimatedInputTokens  = videoCount * 2000;
   const estimatedOutputTokens = videoCount * 100;
