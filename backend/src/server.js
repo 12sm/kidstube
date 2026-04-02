@@ -347,10 +347,11 @@ app.post('/api/admin/discover/channels', requireAdmin, async (req, res) => {
   const queries = [...tags, ...channelNames].filter(Boolean).slice(0, 10);
   if (queries.length === 0) return res.json({ candidates: [] });
 
-  // Channel IDs already known for this profile
+  // Channel IDs already known across all profiles — avoid surfacing channels
+  // the parent has already curated anywhere in the system
   const existingIds = new Set(
-    raw.prepare('SELECT channel_id FROM channels WHERE profile_id = ?')
-       .all(profileId).map(r => r.channel_id)
+    raw.prepare('SELECT DISTINCT channel_id FROM channels')
+       .all().map(r => r.channel_id)
   );
 
   // Run searches sequentially to stay within quota
