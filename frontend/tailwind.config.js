@@ -8,14 +8,14 @@ export default {
     extend: {
       colors: {
         yt: {
-          bg: '#0f0f0f',
-          surface: '#1a1a1a',
-          card: '#212121',
-          border: '#303030',
-          text: '#f1f1f1',
-          muted: '#aaaaaa',
-          red: '#ff0000',
-          hover: '#272727'
+          bg:      'rgb(var(--yt-bg) / <alpha-value>)',
+          surface: 'rgb(var(--yt-surface) / <alpha-value>)',
+          card:    'rgb(var(--yt-card) / <alpha-value>)',
+          border:  'rgb(var(--yt-border) / <alpha-value>)',
+          text:    'rgb(var(--yt-text) / <alpha-value>)',
+          muted:   'rgb(var(--yt-muted) / <alpha-value>)',
+          red:     '#ff0000',
+          hover:   'rgb(var(--yt-hover) / <alpha-value>)',
         }
       },
       fontFamily: {
