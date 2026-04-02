@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const db = require('./db');
 const auth = require('./auth');
 const cron = require('./cron');
+const { backfillChannel } = require('./cron');
 const youtube = require('./youtube');
 const filter = require('./filter');
 const recommendations = require('./recommendations');
@@ -318,6 +319,93 @@ app.delete('/api/search/history/:profileId/:query', (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const query     = decodeURIComponent(req.params.query);
   db.deleteSearchQuery(profileId, query);
+  res.json({ ok: true });
+});
+
+// ── Channel Discovery ────────────────────────────────────────────────────────
+
+app.post('/api/admin/discover/channels', requireAdmin, async (req, res) => {
+  const profileId = parseInt(req.body.profile_id);
+  if (!profileId) return res.status(400).json({ error: 'Missing profile_id' });
+
+  const raw = db.getDb();
+
+  // Top 5 behavior interest tags by weight
+  const tags = raw.prepare(`
+    SELECT tag FROM profile_interests
+    WHERE profile_id = ? AND source = 'behavior' AND weight > 0
+    ORDER BY weight DESC LIMIT 5
+  `).all(profileId).map(r => r.tag);
+
+  // Top 5 whitelisted channel names as search queries
+  const channelNames = raw.prepare(`
+    SELECT channel_name FROM channels
+    WHERE profile_id = ? AND whitelisted = 1 AND channel_name IS NOT NULL
+    ORDER BY RANDOM() LIMIT 5
+  `).all(profileId).map(r => r.channel_name);
+
+  const queries = [...tags, ...channelNames].filter(Boolean).slice(0, 10);
+  if (queries.length === 0) return res.json({ candidates: [] });
+
+  // Channel IDs already known for this profile
+  const existingIds = new Set(
+    raw.prepare('SELECT channel_id FROM channels WHERE profile_id = ?')
+       .all(profileId).map(r => r.channel_id)
+  );
+
+  // Run searches sequentially to stay within quota
+  const allResults = [];
+  for (const q of queries) {
+    const results = await youtube.discoverChannels(q);
+    allResults.push(...results);
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  // Deduplicate by channel_id, remove already-known channels
+  const seen = new Set();
+  const candidates = allResults.filter(c => {
+    if (!c.channel_id || seen.has(c.channel_id) || existingIds.has(c.channel_id)) return false;
+    seen.add(c.channel_id);
+    return true;
+  });
+
+  // Enrich with subscriber counts via channels.list
+  if (candidates.length > 0) {
+    const enriched = await youtube.enrichChannels(candidates.map(c => c.channel_id));
+    const enrichMap = {};
+    for (const e of enriched) enrichMap[e.channel_id] = e;
+    for (const c of candidates) {
+      const e = enrichMap[c.channel_id];
+      if (e) {
+        c.subscriber_count = e.subscriber_count || null;
+        c.description      = c.description || e.description || null;
+      }
+    }
+  }
+
+  // Sort by subscriber count descending, return top 20
+  candidates.sort((a, b) => (b.subscriber_count || 0) - (a.subscriber_count || 0));
+  res.json({ candidates: candidates.slice(0, 20) });
+});
+
+app.post('/api/admin/discover/channels/approve', requireAdmin, async (req, res) => {
+  const { profile_id, channel_id, channel_name, thumbnail_url } = req.body;
+  if (!profile_id || !channel_id) return res.status(400).json({ error: 'Missing profile_id or channel_id' });
+
+  db.upsertChannel({
+    channel_id,
+    profile_id:    parseInt(profile_id),
+    channel_name:  channel_name || '',
+    thumbnail_url: thumbnail_url || null,
+    whitelisted:   1,
+  });
+
+  // Fire-and-forget backfill — runs in background, does not block response
+  backfillChannel(
+    { channel_id, channel_name: channel_name || '', thumbnail_url: thumbnail_url || null },
+    parseInt(profile_id)
+  ).catch(err => console.error('[Discover] backfill failed:', err.message));
+
   res.json({ ok: true });
 });
 
