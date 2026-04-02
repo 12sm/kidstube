@@ -5,7 +5,7 @@ import { ProfileContext } from '../App.jsx';
 const AVATAR_COLORS = ['#e05252', '#4e9de0', '#50c878', '#e0a035', '#9b59b6', '#e07c4e'];
 
 const HomeIcon = ({ active }) => (
-  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white">
+  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-yt-text">
     <path d={active
       ? 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z'
       : 'M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3zm0 2.69l5 4.5V18h-2v-6H9v6H7v-7.81l5-4.5z'
@@ -15,7 +15,7 @@ const HomeIcon = ({ active }) => (
 
 // YouTube Shorts icon — filled bolt (active) / outline bolt (inactive)
 const ShortsIcon = ({ active }) => (
-  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white">
+  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-yt-text">
     <path d={active
       ? 'M17.77 10.32l-1.2-.5.43-.5c1.24-1.44 1.12-3.6-.26-4.88-1.38-1.29-3.55-1.24-4.89.12L8 9h3v10.56c0 .26.21.44.45.44.1 0 .2-.03.28-.1L17 15h-3l3.77-4.68z'
       : 'M17.77 10.32l-1.2-.5.43-.5c1.24-1.44 1.12-3.6-.26-4.88-1.38-1.29-3.55-1.24-4.89.12L8 9h3v10.56c0 .26.21.44.45.44.1 0 .2-.03.28-.1L17 15h-3l3.77-4.68zM14 11h1.77L12 15.24V11H10l-1-1 3.27-3.27c.35-.35.78-.52 1.23-.52.45 0 .89.17 1.23.52l.54.54L14 8.7V11z'
@@ -25,7 +25,7 @@ const ShortsIcon = ({ active }) => (
 
 // YouTube Subscriptions icon (film ticket with play)
 const SubscriptionsIcon = ({ active }) => (
-  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white">
+  <svg viewBox="0 0 24 24" className="w-6 h-6 fill-yt-text">
     <path d={active
       ? 'M20 8H4V6h16v2zm-2-6H6v2h12V2zm4 10v8c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2zm-6 4l-6-3.27v6.53L16 16z'
       : 'M20 8H4V6h16v2zm-2-6H6v2h12V2zm4 10v8c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2zm-2 0H4v8h16v-8zm-6 4l-6-3.27v6.53L14 16z'
@@ -39,7 +39,7 @@ function YouAvatar({ active, initial, color }) {
       className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold transition-all"
       style={{
         backgroundColor: color,
-        boxShadow: active ? `0 0 0 2px white` : 'none',
+        boxShadow: active ? `0 0 0 2px rgb(var(--yt-text))` : 'none',
       }}
     >
       {initial}
@@ -92,7 +92,7 @@ export default function BottomNav() {
             <button
               key={path}
               onClick={() => handleTab(path)}
-              className="flex-1 flex flex-col items-center gap-1 py-2 transition-colors text-white"
+              className="flex-1 flex flex-col items-center gap-1 py-2 transition-colors text-yt-text"
             >
               {type === 'home'          && <HomeIcon active={active} />}
               {type === 'shorts'        && <ShortsIcon active={active} />}
