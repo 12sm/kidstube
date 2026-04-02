@@ -9,7 +9,12 @@ Pick the top TODO item, implement it completely, open a PR. One task per session
 
 ---
 
-### TASK: Wrap KidsTube in a Capacitor iOS app (TestFlight distribution)
+### TASK: Build a KidsTube Roku channel app
+
+> **⬆ TOP OF QUEUE — run this next**
+> Session goal: implement backend stream endpoint + full Roku BrightScript app, build ZIP, open PR. Do NOT sideload — Roku dev mode not yet enabled. See "Stop condition" section below.
+
+---
 
 **Session type:** Single-evening autonomous implementation — no human input required mid-run.
 **Outcome:** Native iOS app on TestFlight for family iPads, with fully unmuted autoplay via WKWebView config.
@@ -237,10 +242,10 @@ No changes to backend, Docker Compose, or nginx.conf.
 
 ---
 
-### TASK: Build a KidsTube Roku channel app
+### TASK: Build a KidsTube Roku channel app ← FULL SPEC BELOW
 
 **Session type:** Single-evening autonomous implementation — no human input required mid-run.
-**Outcome:** Sideloaded Roku channel that shows Child1/Child2's curated feed and plays videos via yt-dlp stream extraction.
+**Outcome:** All Roku app files written, backend stream endpoint live, ZIP packaged, PR open with sideload command ready. Sideloading done by human after enabling Roku dev mode.
 **ToS note:** YouTube stream extraction via yt-dlp is against YouTube's ToS. Acceptable at household scale for private family use.
 
 ---
@@ -757,18 +762,18 @@ Re-deploy after changes: rebuild ZIP and re-run the curl. No need to delete the 
 
 ---
 
-#### Acceptance criteria
+#### Stop condition — human step required
+
+**Do NOT attempt to sideload.** The Roku does not have developer mode enabled yet — the owner will do that (Home×3, Up×2, Right, Left, Right, Left, Right on the remote) while reviewing the PR. Stop after building the ZIP and opening the PR. Include the exact sideload command in the PR description so it's ready to paste.
+
+#### Acceptance criteria (what the session must verify before opening the PR)
 
 - [ ] `curl http://localhost:3001/api/stream/dQw4w9WgXcQ` returns JSON with a valid `url` field
 - [ ] Second call within 25 min returns `"cached": true`
-- [ ] `docker compose ps` shows backend healthy
-- [ ] Sideload curl returns HTML containing "Success"
-- [ ] KidsTube channel appears on Roku home screen
-- [ ] Profile select shows Child1/Child2 cards, D-pad toggles focus
-- [ ] OK on a profile loads the video grid with thumbnails
-- [ ] Selecting a video plays it (may take 3–8s to fetch stream URL)
-- [ ] Back from player returns to grid; back from grid returns to profile select
-- [ ] Watch history recorded: `curl http://localhost:3001/api/watch-history/5`
+- [ ] `docker compose ps` shows backend healthy after rebuild
+- [ ] `roku-app/` directory created with all files (manifest, source/, components/, images/)
+- [ ] `unzip -l kidstube-roku.zip | head -5` shows `manifest` at ZIP root (not in a subdirectory)
+- [ ] PR description includes the exact sideload curl command with correct server LAN IP filled in
 
 ---
 
