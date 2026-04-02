@@ -135,21 +135,29 @@ function formatDate(uploadDate) {
 
 async function getStreamUrl(videoId) {
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  // Format 18 = 360p progressive mp4, always muxed (video+audio in one stream).
+  // It's the only YouTube format guaranteed to have both tracks in a single URL.
+  // DASH formats (bestvideo+bestaudio) require merging and can't be streamed directly.
+  // HLS manifests from YouTube often separate audio/video as distinct renditions,
+  // which some Roku firmware versions don't reassemble correctly.
   const formatSelectors = [
-    'hls*',
-    'best[ext=mp4][height<=720]',
-    'best[height<=720]',
-    'best'
+    '18',                                              // 360p muxed mp4 — most compatible
+    'best[vcodec!=none][acodec!=none][height<=480][ext=mp4]',  // muxed mp4 <=480p
+    'best[vcodec!=none][acodec!=none][height<=720][ext=mp4]',  // muxed mp4 <=720p
+    'best[vcodec!=none][acodec!=none][ext=mp4]',               // any muxed mp4
   ];
   for (const fmt of formatSelectors) {
     try {
       const args = ['--no-warnings', '--no-playlist', '-f', fmt, '-g', '--no-check-certificate', videoUrl];
       const { stdout } = await runYtDlp(args);
-      const url = stdout.trim().split('\n')[0];
-      if (url && url.startsWith('http')) {
-        const isHls = url.includes('.m3u8') || fmt === 'hls*';
-        return { url, type: isHls ? 'hls' : 'mp4' };
+      // -g returns one URL for muxed formats, two lines for DASH (video\naudio).
+      // Only accept single-URL results — two lines means unmuxed DASH.
+      const lines = stdout.trim().split('\n').filter(l => l.startsWith('http'));
+      if (lines.length === 1) {
+        console.log(`[stream] ${videoId} format=${fmt} url=${lines[0].slice(0, 80)}`);
+        return { url: lines[0], type: 'mp4' };
       }
+      console.warn(`[stream] ${videoId} format=${fmt} returned ${lines.length} URLs (DASH) — skipping`);
     } catch (err) {
       console.warn(`[stream] Format ${fmt} failed for ${videoId}:`, err.message.slice(0, 100));
     }

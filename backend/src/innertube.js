@@ -9,7 +9,7 @@ async function getClient() {
   if (ytClient) return ytClient;
   const { Innertube, UniversalCache } = await import('youtubei.js');
   ytClient = await Innertube.create({
-    client_type: 'TV',
+    client_type: 'IOS',
     generate_session_locally: true,
     cache: new UniversalCache(true, '/app/data/yt-cache'),
   });
@@ -26,7 +26,7 @@ async function getStreamInfo(videoId) {
 
   const yt = await getClient();
   console.log(`[innertube] Fetching stream info for ${videoId}`);
-  const info = await yt.getBasicInfo(videoId, { client: 'TV' });
+  const info = await yt.getBasicInfo(videoId, { client: 'IOS' });
 
   if (info.playability_status?.status !== 'OK') {
     throw new Error(info.playability_status?.reason || 'Video not playable');
