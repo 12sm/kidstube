@@ -3,6 +3,7 @@ sub init()
     m.top.findNode("profileLabel").text = m.global.profileName
     m.videoGrid.itemComponentName = "ItemRenderer"
     m.videoGrid.observeField("itemSelected", "onItemSelected")
+    m.lastSelectedIndex = 0
     m.videoGrid.setFocus(true)
     fetchFeed()
 end sub
@@ -37,6 +38,7 @@ sub onItemSelected()
     if m.player <> invalid then return
     item = m.videoGrid.content.getChild(m.videoGrid.itemSelected)
     if item = invalid then return
+    m.lastSelectedIndex = m.videoGrid.itemSelected
     ' Signal the parent (ProfileSelect) to hide us — a component cannot modify its own
     ' root node's rendering properties (visible/opacity) from within its own BrightScript
     m.top.isPlaying = true
@@ -53,6 +55,9 @@ sub onPlaybackDone()
     m.player = invalid
     m.top.isPlaying = false
     m.videoGrid.setFocus(true)
+    if m.lastSelectedIndex > 0
+        m.videoGrid.jumpToItem = m.lastSelectedIndex
+    end if
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
