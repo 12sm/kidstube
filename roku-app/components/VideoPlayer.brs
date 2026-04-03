@@ -33,7 +33,7 @@ sub onVideoIdSet()
     m.errorLabel.visible = false
     m.streamTask = createObject("roSGNode", "FetchTask")
     m.streamTask.url = m.global.backendUrl + "/api/stream/" + m.top.videoId
-    m.streamTask.observeField("response", "onStreamUrlLoaded")
+    m.streamTask.observeFieldScoped("response", "onStreamUrlLoaded")
     m.streamTask.control = "RUN"
 end sub
 

@@ -2,7 +2,7 @@ sub init()
     m.videoGrid = m.top.findNode("videoGrid")
     m.top.findNode("profileLabel").text = m.global.profileName
     m.videoGrid.itemComponentName = "ItemRenderer"
-    m.videoGrid.observeField("itemSelected", "onItemSelected")
+    m.videoGrid.observeFieldScoped("itemSelected", "onItemSelected")
     m.lastSelectedIndex = 0
     m.videoGrid.setFocus(true)
     fetchFeed()
@@ -11,7 +11,7 @@ end sub
 sub fetchFeed()
     m.task = createObject("roSGNode", "FetchTask")
     m.task.url = m.global.backendUrl + "/api/feed/" + m.global.profileId.toStr() + "?limit=40"
-    m.task.observeField("response", "onFeedLoaded")
+    m.task.observeFieldScoped("response", "onFeedLoaded")
     m.task.control = "RUN"
 end sub
 
@@ -45,7 +45,7 @@ sub onItemSelected()
     m.player = m.top.getScene().createChild("VideoPlayer")
     m.player.videoId = item.videoId
     m.player.videoTitle = item.title
-    m.player.observeField("isDone", "onPlaybackDone")
+    m.player.observeFieldScoped("isDone", "onPlaybackDone")
     m.player.setFocus(true)
 end sub
 

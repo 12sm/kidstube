@@ -50,8 +50,8 @@ sub selectProfile(profileId as Integer, profileName as String)
     ' HomeScene lives inside homeWrapper so we can hide/show it by toggling the wrapper
     ' (can't reliably set visible/opacity on a component root node from outside)
     m.homeScene = m.homeWrapper.createChild("HomeScene")
-    m.homeScene.observeField("isDone", "onHomeDone")
-    m.homeScene.observeField("isPlaying", "onHomeScenePlaying")
+    m.homeScene.observeFieldScoped("isDone", "onHomeDone")
+    m.homeScene.observeFieldScoped("isPlaying", "onHomeScenePlaying")
     m.homeScene.setFocus(true)
 end sub
 
