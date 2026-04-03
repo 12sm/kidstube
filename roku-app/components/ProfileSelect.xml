@@ -13,5 +13,7 @@
             <Label id="emeryLabel" text="Emery" width="220" horizAlign="center"
                    translation="[770, 530]" color="0xFFFFFFFF" font="font:MediumBoldSystemFont" />
         </Group>
+        <Group id="homeWrapper" />
+        <Group id="videoContainer" />
     </children>
 </component>

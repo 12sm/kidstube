@@ -2,6 +2,9 @@
 <component name="HomeScene" extends="Group">
     <interface>
         <field id="isDone" type="boolean" value="false" />
+        <field id="isPlaying" type="boolean" value="false" />
+        <field id="pendingVideoId" type="string" value="" />
+        <field id="pendingVideoTitle" type="string" value="" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/HomeScene.brs" />
     <children>

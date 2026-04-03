@@ -3,6 +3,7 @@ sub init()
     m.top.findNode("profileLabel").text = m.global.profileName
     m.videoGrid.itemComponentName = "ItemRenderer"
     m.videoGrid.observeFieldScoped("itemSelected", "onItemSelected")
+    m.top.observeField("isPlaying", "onIsPlayingChange")
     m.lastSelectedIndex = 0
     m.videoGrid.setFocus(true)
     fetchFeed()
@@ -35,36 +36,28 @@ sub onFeedLoaded()
 end sub
 
 sub onItemSelected()
-    if m.player <> invalid then return
+    if m.top.isPlaying then return   ' guard: already in playback
     item = m.videoGrid.content.getChild(m.videoGrid.itemSelected)
     if item = invalid then return
     m.lastSelectedIndex = m.videoGrid.itemSelected
-    ' Signal the parent (ProfileSelect) to hide us — a component cannot modify its own
-    ' root node's rendering properties (visible/opacity) from within its own BrightScript
+    ' Pass video info to ProfileSelect (which owns VideoPlayer lifecycle) via interface fields
+    m.top.pendingVideoId = item.videoId
+    m.top.pendingVideoTitle = item.title
+    ' ProfileSelect observes isPlaying and creates the VideoPlayer in videoContainer
     m.top.isPlaying = true
-    m.player = m.top.getScene().createChild("VideoPlayer")
-    m.player.videoId = item.videoId
-    m.player.videoTitle = item.title
-    m.player.observeFieldScoped("isDone", "onPlaybackDone")
-    m.player.setFocus(true)
 end sub
 
-sub onPlaybackDone()
-    print "[HomeScene] onPlaybackDone — restoring UI and focus"
-    if m.player <> invalid
-        m.player.unobserveField("isDone")
-        m.top.getScene().removeChild(m.player)
-        m.player = invalid
-    end if
-    m.top.isPlaying = false
-    m.videoGrid.setFocus(true)
-    if m.lastSelectedIndex > 0
-        m.videoGrid.jumpToItem = m.lastSelectedIndex
+sub onIsPlayingChange()
+    ' ProfileSelect sets isPlaying = false when playback ends — restore grid focus
+    if not m.top.isPlaying then
+        m.videoGrid.setFocus(true)
+        if m.lastSelectedIndex > 0
+            m.videoGrid.jumpToItem = m.lastSelectedIndex
+        end if
     end if
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    print "[HomeScene] onKeyEvent key=" key " press=" press
     keys = RemoteKeys()
     if press and key = keys.back then
         m.top.isDone = true
