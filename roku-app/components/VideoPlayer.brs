@@ -140,7 +140,6 @@ sub reportProgress()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    print "[VideoPlayer] onKeyEvent key=" key " press=" press
     keys = RemoteKeys()
     if press then
         if key = keys.back then
