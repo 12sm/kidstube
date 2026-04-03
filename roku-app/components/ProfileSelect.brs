@@ -67,8 +67,13 @@ sub onHomeScenePlaying()
 end sub
 
 sub onHomeDone()
-    m.top.getScene().removeChild(m.homeScene)
-    m.homeScene = invalid
+    if m.homeScene <> invalid
+        m.homeScene.unobserveField("isDone")
+        m.homeScene.unobserveField("isPlaying")
+        m.top.getScene().removeChild(m.homeScene)
+        m.homeScene = invalid
+    end if
+    m.homeWrapper.visible = true
     m.profileUI.visible = true
     m.top.setFocus(true)
 end sub

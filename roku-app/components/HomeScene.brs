@@ -51,8 +51,11 @@ end sub
 
 sub onPlaybackDone()
     print "[HomeScene] onPlaybackDone — restoring UI and focus"
-    m.top.getScene().removeChild(m.player)
-    m.player = invalid
+    if m.player <> invalid
+        m.player.unobserveField("isDone")
+        m.top.getScene().removeChild(m.player)
+        m.player = invalid
+    end if
     m.top.isPlaying = false
     m.videoGrid.setFocus(true)
     if m.lastSelectedIndex > 0
