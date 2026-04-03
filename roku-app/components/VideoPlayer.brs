@@ -1,12 +1,22 @@
 sub init()
-    m.videoNode = createObject("roSGNode", "Video")
-    m.videoNode.width = 1280
-    m.videoNode.height = 720
-    m.top.appendChild(m.videoNode)
+    ' m.top IS the Video node (extends Video) — no separate child Video needed
+    m.top.width = 1280
+    m.top.height = 720
+    ' Disable the built-in Roku video OSD — it takes over focus and key handling
+    ' when state=playing, routing key events away from our onKeyEvent
+    m.top.enableUI = false
+    ' Roku OS 12.5+: async stop prevents synchronous timeout crashes when
+    ' rapidly creating/destroying VideoPlayer nodes
+    if m.top.hasField("asyncStopSemantics")
+        m.top.asyncStopSemantics = true
+    end if
+    ' Claim focus immediately — don't wait for the caller to setFocus after creation,
+    ' because hiding the grid in onItemSelected can shift focus to the Scene first
+    m.top.setFocus(true)
     m.loadingBg = m.top.findNode("loadingBg")
     m.loadingLabel = m.top.findNode("loadingLabel")
     m.errorLabel = m.top.findNode("errorLabel")
-    m.videoNode.observeField("state", "onPlayerStateChange")
+    m.top.observeField("state", "onPlayerStateChange")
     m.top.observeField("videoId", "onVideoIdSet")
     m.lastReportedPosition = 0
     m.progressTimer = createObject("roSGNode", "Timer")
@@ -16,12 +26,8 @@ sub init()
 end sub
 
 sub onVideoIdSet()
-    if m.top.videoId = "" then
-        return
-    end if
-    if m.top.videoId = invalid then
-        return
-    end if
+    if m.top.videoId = "" then return
+    if m.top.videoId = invalid then return
     m.loadingBg.visible = true
     m.loadingLabel.visible = true
     m.errorLabel.visible = false
@@ -53,22 +59,22 @@ sub onStreamUrlLoaded()
         return
     end if
     print "[VideoPlayer] got stream url type=" parsed.type
-    m.loadingLabel.visible = false
     content = createObject("roSGNode", "ContentNode")
     content.url = parsed.url
     content.title = m.top.videoTitle
     content.streamFormat = parsed.type
-    m.videoNode.content = content
-    m.videoNode.control = "play"
-    m.videoNode.setFocus(true)
+    m.top.content = content
+    m.top.control = "play"
+    m.top.setFocus(true)
     m.progressTimer.control = "start"
 end sub
 
 sub onPlayerStateChange()
-    state = m.videoNode.state
+    state = m.top.state
     print "[VideoPlayer] state=" state
     if state = "playing" then
-        ' Hide all UI so the hardware video plane shows through
+        ' Re-assert focus — hiding child nodes can cause Roku to shift focus away
+        m.top.setFocus(true)
         m.loadingBg.visible = false
         m.loadingLabel.visible = false
     end if
@@ -79,7 +85,7 @@ sub onPlayerStateChange()
     end if
     if state = "error" then
         m.progressTimer.control = "stop"
-        print "[VideoPlayer] error=" m.videoNode.errorStr
+        print "[VideoPlayer] error=" m.top.errorStr
         m.loadingLabel.visible = false
         m.errorLabel.text = "Video unavailable"
         m.errorLabel.visible = true
@@ -89,6 +95,11 @@ sub onPlayerStateChange()
         m.dismissTimer.observeField("fire", "onDismissTimer")
         m.dismissTimer.control = "start"
     end if
+    ' Only signal done after Video node has fully stopped so Roku releases the
+    ' media engine before HomeScene removes this node and creates a new one
+    if state = "stopped" then
+        m.top.isDone = true
+    end if
 end sub
 
 sub onDismissTimer()
@@ -96,19 +107,16 @@ sub onDismissTimer()
 end sub
 
 sub dismiss()
-    m.videoNode.control = "stop"
-    m.top.isDone = true
+    m.top.control = "stop"
+    ' isDone is set in onPlayerStateChange when state="stopped"
+    ' This ensures the media engine is released before the node is removed
 end sub
 
 sub reportProgress()
-    curPos = m.videoNode.position
-    curDur = m.videoNode.duration
-    if curPos <= 0 then
-        return
-    end if
-    if curPos = m.lastReportedPosition then
-        return
-    end if
+    curPos = m.top.position
+    curDur = m.top.duration
+    if curPos <= 0 then return
+    if curPos = m.lastReportedPosition then return
     m.lastReportedPosition = curPos
     reqBody = {}
     reqBody["profile_id"] = m.global.profileId
@@ -123,6 +131,7 @@ sub reportProgress()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
+    print "[VideoPlayer] onKeyEvent key=" key " press=" press
     if press then
         if key = "back" then
             m.progressTimer.control = "stop"
