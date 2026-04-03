@@ -706,10 +706,205 @@ function VideoLibrary() {
   );
 }
 
+const JOBS = [
+  { name: 'nightly',         label: 'Full Nightly Refresh' },
+  { name: 'channel-audit',   label: 'Channel Audit' },
+  { name: 'backfill-tag',    label: 'LLM Backfill: Tag Untagged' },
+  { name: 'backfill-reeval', label: 'LLM Backfill: Re-evaluate Rejections' },
+];
+
+function formatDryRunReport(data) {
+  const lines = [`[${data.job} — Dry Run]`, ''];
+
+  if (data.job === 'nightly') {
+    (data.counts.channelsByProfile || []).forEach(r => {
+      lines.push(`  ${r.profileName}: ${r.cnt} channels`);
+    });
+    lines.push(`  Est. new videos/night: ~${data.counts.estimatedNewVideos}`);
+    lines.push(`  Pending LLM review:    ${data.counts.needsLlmReview}`);
+  } else if (data.job === 'channel-audit') {
+    (data.counts.channelsByProfile || []).forEach(r => {
+      lines.push(`  ${r.profileName}: ${r.cnt} channels → ${Math.ceil(r.cnt / 10)} batches`);
+    });
+    lines.push(`  Total batches: ${data.counts.totalBatches}`);
+  } else if (data.job === 'backfill-tag') {
+    lines.push(`  Approved videos without tags: ${data.counts.videoCount}`);
+  } else if (data.job === 'backfill-reeval') {
+    lines.push(`  Soft-keyword rejections pending re-eval: ${data.counts.videoCount}`);
+  }
+
+  lines.push('');
+  lines.push(`  Estimated Haiku calls: ${data.estimatedCalls}`);
+  lines.push(`  Est. input:  ${data.estimatedInputTokens.toLocaleString()} tok  →  $${(data.estimatedInputTokens * 0.80 / 1_000_000).toFixed(3)}`);
+  lines.push(`  Est. output: ${data.estimatedOutputTokens.toLocaleString()} tok  →  $${(data.estimatedOutputTokens * 4.00 / 1_000_000).toFixed(3)}`);
+  lines.push('  ─────────────────────────────────────');
+  lines.push(`  Estimated total cost:  ~$${data.estimatedCostUsd.toFixed(3)}`);
+
+  return lines;
+}
+
+function JobsPanel() {
+  const [activeJob, setActiveJob]       = useState(null); // { name, mode } | null
+  const [openDropdown, setOpenDropdown] = useState(null);
+  const [logLines, setLogLines]         = useState([]);
+  const [jobHeader, setJobHeader]       = useState('');
+  const [jobDone, setJobDone]           = useState(null); // { exitCode } | null
+  const logEndRef = useRef(null);
+  const esRef     = useRef(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logLines]);
+
+  useEffect(() => {
+    if (!openDropdown) return;
+    const handler = () => setOpenDropdown(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [openDropdown]);
+
+  useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, []);
+
+  const startDryRun = async (jobName) => {
+    setOpenDropdown(null);
+    const job = JOBS.find(j => j.name === jobName);
+    setActiveJob({ name: jobName, mode: 'dry-run' });
+    setJobHeader(`${job.label} — Dry Run`);
+    setLogLines(['Running dry run...']);
+    setJobDone(null);
+
+    try {
+      const res = await fetch(`/api/admin/jobs/${jobName}/dry-run`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      setLogLines(formatDryRunReport(data));
+      setJobDone({ exitCode: 0 });
+    } catch (err) {
+      setLogLines([`Error: ${err.message}`]);
+      setJobDone({ exitCode: 1 });
+    } finally {
+      setActiveJob(null);
+    }
+  };
+
+  const startJob = (jobName) => {
+    if (esRef.current) esRef.current.close();
+    const job = JOBS.find(j => j.name === jobName);
+    setActiveJob({ name: jobName, mode: 'run' });
+    setJobHeader(job.label);
+    setLogLines([]);
+    setJobDone(null);
+
+    const es = new EventSource(`/api/admin/jobs/${jobName}/stream`, { withCredentials: true });
+    esRef.current = es;
+
+    es.onmessage = (e) => setLogLines(prev => [...prev, e.data]);
+
+    es.addEventListener('done', (e) => {
+      const { exitCode } = JSON.parse(e.data);
+      setJobDone({ exitCode });
+      setActiveJob(null);
+      es.close();
+      esRef.current = null;
+    });
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) {
+        setLogLines(prev => [...prev, '⚠ Connection lost']);
+        setJobDone({ exitCode: 1 });
+        setActiveJob(null);
+        esRef.current = null;
+      }
+    };
+  };
+
+  const clearLog = () => {
+    setLogLines([]);
+    setJobHeader('');
+    setJobDone(null);
+  };
+
+  const hasLog = jobHeader || logLines.length > 0;
+
+  return (
+    <section>
+      <h2 className="text-yt-text font-semibold text-base mb-3">Jobs</h2>
+      <div className="flex flex-wrap gap-2">
+        {JOBS.map(job => (
+          <div key={job.name} className="flex rounded-lg overflow-visible border border-yt-border">
+            <button
+              onClick={() => startJob(job.name)}
+              disabled={!!activeJob}
+              className="px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 rounded-l-lg"
+            >
+              {activeJob?.name === job.name && activeJob.mode === 'run' ? 'Running...' : job.label}
+            </button>
+            <div className="w-px bg-blue-800" />
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenDropdown(openDropdown === job.name ? null : job.name);
+                }}
+                disabled={!!activeJob}
+                className="px-2 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 rounded-r-lg"
+              >
+                ▾
+              </button>
+              {openDropdown === job.name && (
+                <div className="absolute left-0 top-full mt-1 bg-yt-card border border-yt-border rounded-lg shadow-lg z-20 min-w-max">
+                  <button
+                    onClick={() => startDryRun(job.name)}
+                    className="block w-full text-left px-4 py-2 text-sm text-yt-text hover:bg-yt-hover whitespace-nowrap"
+                  >
+                    Dry Run
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {hasLog && (
+        <div className="mt-4 rounded-xl border border-yt-border overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-yt-surface border-b border-yt-border">
+            <span className="text-sm font-medium text-yt-text">
+              {activeJob ? '● ' : ''}{jobHeader}
+            </span>
+            <button onClick={clearLog} className="text-yt-muted hover:text-yt-text text-xs">
+              Clear ✕
+            </button>
+          </div>
+          <div className="bg-yt-card p-4 h-64 overflow-y-auto font-mono text-xs text-yt-text">
+            {logLines.map((line, i) => (
+              <div key={i} className="leading-5">{line || '\u00A0'}</div>
+            ))}
+            {jobDone && (
+              <div className={`mt-2 ${jobDone.exitCode === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {jobDone.exitCode === 0 ? '✓ Done' : `✗ Failed (exit ${jobDone.exitCode})`}
+              </div>
+            )}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AdminDashboard() {
   const [stats, setStats] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [msg, setMsg] = useState('');
   const [profiles, setProfiles] = useState([]);
 
   useEffect(() => {
@@ -724,34 +919,11 @@ function AdminDashboard() {
       .catch(() => {});
   }, []);
 
-  const triggerRefresh = async () => {
-    setRefreshing(true);
-    setMsg('');
-    try {
-      const res = await fetch('/api/admin/refresh', { method: 'POST', credentials: 'include' });
-      const data = await res.json();
-      setMsg(data.message || 'Refresh triggered');
-    } catch {
-      setMsg('Error triggering refresh');
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-yt-text">Dashboard</h2>
-        <button
-          onClick={triggerRefresh}
-          disabled={refreshing}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-        >
-          {refreshing ? 'Running...' : 'Manual Refresh'}
-        </button>
-      </div>
+      <h2 className="text-xl font-semibold text-yt-text">Dashboard</h2>
 
-      {msg && <div className="bg-yt-card border border-yt-border rounded-lg p-3 text-sm text-yt-text">{msg}</div>}
+      <JobsPanel />
 
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

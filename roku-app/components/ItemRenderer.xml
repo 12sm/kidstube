@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="ItemRenderer" extends="Group">
+    <interface>
+        <field id="width" type="float" />
+        <field id="height" type="float" />
+        <field id="itemContent" type="node" />
+        <field id="focusPercent" type="float" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/ItemRenderer.brs" />
+    <children>
+        <Poster id="thumbnail" width="280" height="157" loadingBitmapOpacity="0.3" />
+        <Label id="titleLabel" width="280" height="36" translation="[0, 161]"
+               font="font:SmallSystemFont" color="0xFFFFFFFF" wrap="true" maxLines="2" />
+        <Label id="channelLabel" width="280" height="20" translation="[0, 197]"
+               font="font:SmallSystemFont" color="0xAAAAAAFF" />
+    </children>
+</component>

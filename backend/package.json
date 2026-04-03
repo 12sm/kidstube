@@ -11,7 +11,9 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.js"]
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -24,7 +26,8 @@
     "googleapis": "^144.0.0",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
-    "xml2js": "^0.6.2"
+    "xml2js": "^0.6.2",
+    "youtubei.js": "^17.0.1"
   },
   "devDependencies": {
     "jest": "^30.3.0",

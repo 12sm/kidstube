@@ -165,7 +165,8 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
     view_count: videoData.view_count || null,
     status: 'pending',
     is_recommended: isRecommended ? 1 : 0,
-    source_video_id: sourceVideoId || null
+    source_video_id: sourceVideoId || null,
+    needs_llm_review: 0
   });
 
   // Pass 0a: Shorts / live detection on RSS metadata

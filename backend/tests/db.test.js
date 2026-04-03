@@ -365,7 +365,10 @@ describe('channel_recommendations', () => {
   test('upsertChannelRecommendation updates on re-run', () => {
     db.upsertChannelRecommendation('UCtest1', 5, 'enable', 'First reason');
     db.upsertChannelRecommendation('UCtest1', 5, 'disable', 'Updated reason');
-    const recs = db.getChannelRecommendations(5);
+    // Use getAllChannelRecommendations — getChannelRecommendations filters for actionable recs
+    // only (disable + whitelisted=1, or enable + whitelisted=0). UCtest1 has whitelisted=0 so
+    // a 'disable' rec is not actionable, but the upsert itself should still have updated it.
+    const recs = db.getAllChannelRecommendations(5);
     expect(recs).toHaveLength(1);
     expect(recs[0].recommendation).toBe('disable');
     expect(recs[0].reason).toBe('Updated reason');
