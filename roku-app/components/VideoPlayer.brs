@@ -15,7 +15,6 @@ sub init()
     m.top.setFocus(true)
     m.loadingBg = m.top.findNode("loadingBg")
     m.loadingLabel = m.top.findNode("loadingLabel")
-    m.errorLabel = m.top.findNode("errorLabel")
     m.top.observeField("state", "onPlayerStateChange")
     m.top.observeField("videoId", "onVideoIdSet")
     m.lastReportedPosition = 0
@@ -30,7 +29,6 @@ sub onVideoIdSet()
     if m.top.videoId = invalid then return
     m.loadingBg.visible = true
     m.loadingLabel.visible = true
-    m.errorLabel.visible = false
     m.streamTask = createObject("roSGNode", "FetchTask")
     m.streamTask.url = m.global.backendUrl + "/api/stream/" + m.top.videoId
     m.streamTask.observeFieldScoped("response", "onStreamUrlLoaded")
@@ -42,20 +40,13 @@ sub onStreamUrlLoaded()
     if parsed = invalid then
         print "[VideoPlayer] stream response parse failed"
         m.loadingLabel.visible = false
-        m.errorLabel.text = "Stream unavailable"
-        m.errorLabel.visible = true
+        showErrorDialog("This video is not available right now.")
         return
     end if
     if parsed.url = invalid then
         print "[VideoPlayer] stream response missing url"
         m.loadingLabel.visible = false
-        m.errorLabel.text = "Video unavailable"
-        m.errorLabel.visible = true
-        m.dismissTimer = createObject("roSGNode", "Timer")
-        m.dismissTimer.duration = 2
-        m.dismissTimer.repeat = false
-        m.dismissTimer.observeField("fire", "onDismissTimer")
-        m.dismissTimer.control = "start"
+        showErrorDialog("This video is not available right now.")
         return
     end if
     print "[VideoPlayer] got stream url type=" parsed.type
@@ -71,7 +62,6 @@ end sub
 
 sub onPlayerStateChange()
     state = m.top.state
-    print "[VideoPlayer] state=" state
     if state = "playing" then
         ' Re-assert focus — hiding child nodes can cause Roku to shift focus away
         m.top.setFocus(true)
@@ -87,22 +77,41 @@ sub onPlayerStateChange()
         m.progressTimer.control = "stop"
         print "[VideoPlayer] error=" m.top.errorStr
         m.loadingLabel.visible = false
-        m.errorLabel.text = "Video unavailable"
-        m.errorLabel.visible = true
-        m.dismissTimer = createObject("roSGNode", "Timer")
-        m.dismissTimer.duration = 2
-        m.dismissTimer.repeat = false
-        m.dismissTimer.observeField("fire", "onDismissTimer")
-        m.dismissTimer.control = "start"
+        showErrorDialog("Could not play this video. Please try again.")
     end if
     ' Only signal done after Video node has fully stopped so Roku releases the
-    ' media engine before HomeScene removes this node and creates a new one
+    ' media engine before ProfileSelect removes this node and creates a new one
     if state = "stopped" then
         m.top.isDone = true
     end if
 end sub
 
+sub showErrorDialog(message as String)
+    dialog = createObject("roSGNode", "SimpleDialog")
+    dialog.title = "Video Unavailable"
+    dialog.message = message
+    dialog.buttons = ["OK"]
+    dialog.observeFieldScoped("buttonSelected", "onErrorDialogButton")
+    m.top.getScene().dialog = dialog
+    ' Auto-dismiss after 4 seconds if user doesn't press OK
+    m.dismissTimer = createObject("roSGNode", "Timer")
+    m.dismissTimer.duration = 4
+    m.dismissTimer.repeat = false
+    m.dismissTimer.observeFieldScoped("fire", "onDismissTimer")
+    m.dismissTimer.control = "start"
+end sub
+
+sub onErrorDialogButton()
+    m.top.getScene().dialog = invalid
+    if m.dismissTimer <> invalid
+        m.dismissTimer.control = "stop"
+        m.dismissTimer = invalid
+    end if
+    dismiss()
+end sub
+
 sub onDismissTimer()
+    m.top.getScene().dialog = invalid
     dismiss()
 end sub
 
