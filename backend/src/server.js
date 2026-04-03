@@ -13,6 +13,13 @@ const filter = require('./filter');
 const recommendations = require('./recommendations');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
+const { fetchVideoData } = require('./ytdlp');
+const innertube = require('./innertube');
+const dash = require('./dash');
+const { spawn } = require('child_process');
+const path       = require('path');
+const jobDryRun  = require('./jobDryRun');
+
 
 const crypto = require('crypto');
 
@@ -35,6 +42,24 @@ db.migrate();
 
 // Start cron scheduler
 cron.scheduleJob();
+
+// ── Jobs ─────────────────────────────────────────────────────────────────────
+
+const DRY_RUN_FNS = {
+  'nightly':         jobDryRun.dryRunNightly,
+  'channel-audit':   jobDryRun.dryRunChannelAudit,
+  'backfill-tag':    jobDryRun.dryRunBackfillTag,
+  'backfill-reeval': jobDryRun.dryRunBackfillReeval,
+};
+
+const SCRIPT_MAP = {
+  'nightly':         ['nightly.js'],
+  'channel-audit':   ['audit-channels.js'],
+  'backfill-tag':    ['backfill-llm.js', 'a'],
+  'backfill-reeval': ['backfill-llm.js', 'b'],
+};
+
+let activeJobStream = null;
 
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -190,6 +215,40 @@ app.get('/api/video/:videoId', (req, res) => {
   const video = db.getVideoById(videoId);
   if (!video) return res.status(404).json({ error: 'Video not found' });
   res.json({ video });
+});
+
+// Get a DASH manifest URL for a video (used by Roku channel)
+app.get('/api/stream/:videoId', async (req, res) => {
+  const { videoId } = req.params;
+  console.log(`[stream] Request for ${videoId}`);
+  if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
+  try {
+    const t0 = Date.now();
+    await innertube.getStreamInfo(videoId);
+    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms`);
+    const manifestUrl = `${req.protocol}://${req.headers.host}/api/manifest/${videoId}`;
+    res.json({ url: manifestUrl, type: 'dash' });
+  } catch (err) {
+    console.error(`[stream] Failed for ${videoId}:`, err.message);
+    res.status(502).json({ error: 'Stream unavailable', detail: err.message });
+  }
+});
+
+// Serve the DASH manifest for a video (Roku media player fetches this directly)
+app.get('/api/manifest/:videoId', (req, res) => {
+  const { videoId } = req.params;
+  const cached = innertube.getCached(videoId);
+  if (!cached) {
+    return res.status(404).json({ error: 'Stream info not cached — call /api/stream first' });
+  }
+  try {
+    const mpd = dash.buildManifest(cached.formats, cached.durationMs);
+    res.set('Content-Type', 'application/dash+xml');
+    res.send(mpd);
+  } catch (err) {
+    console.error(`[manifest] Build failed for ${videoId}:`, err.message);
+    res.status(500).json({ error: 'Manifest generation failed', detail: err.message });
+  }
 });
 
 // ── Watch History Routes ──────────────────────────────────────────────────────
@@ -465,6 +524,61 @@ app.post('/api/admin/refresh', requireAdmin, async (req, res) => {
   // Run in background after responding
   setImmediate(() => {
     cron.runNightlyJob().catch(err => console.error('Manual refresh error:', err));
+  });
+});
+
+app.post('/api/admin/jobs/:name/dry-run', requireAdmin, (req, res) => {
+  const fn = DRY_RUN_FNS[req.params.name];
+  if (!fn) return res.status(404).json({ error: 'Unknown job' });
+  try {
+    res.json(fn());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/jobs/:name/stream', requireAdmin, (req, res) => {
+  const script = SCRIPT_MAP[req.params.name];
+  if (!script) return res.status(404).json({ error: 'Unknown job' });
+
+  if (activeJobStream) {
+    return res.status(409).json({ error: 'A job is already running' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const scriptPath = path.join(__dirname, '..', 'scripts', script[0]);
+  const args       = script.slice(1);
+  const child      = spawn(process.execPath, [scriptPath, ...args], {
+    env: { ...process.env },
+    cwd: path.join(__dirname, '..'),
+  });
+
+  activeJobStream = child;
+
+  const sendLine = (line) => res.write(`data: ${line}\n\n`);
+
+  child.stdout.on('data', chunk =>
+    chunk.toString().split('\n').filter(Boolean).forEach(sendLine)
+  );
+  child.stderr.on('data', chunk =>
+    chunk.toString().split('\n').filter(Boolean).forEach(sendLine)
+  );
+
+  child.on('close', code => {
+    res.write(`event: done\ndata: ${JSON.stringify({ exitCode: code })}\n\n`);
+    res.end();
+    activeJobStream = null;
+  });
+
+  req.on('close', () => {
+    if (activeJobStream === child) {
+      child.kill();
+      activeJobStream = null;
+    }
   });
 });
 
