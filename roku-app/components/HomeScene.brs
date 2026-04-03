@@ -37,7 +37,9 @@ sub onItemSelected()
     if m.player <> invalid then return
     item = m.videoGrid.content.getChild(m.videoGrid.itemSelected)
     if item = invalid then return
-    m.top.visible = false
+    ' Signal the parent (ProfileSelect) to hide us — a component cannot modify its own
+    ' root node's rendering properties (visible/opacity) from within its own BrightScript
+    m.top.isPlaying = true
     m.player = m.top.getScene().createChild("VideoPlayer")
     m.player.videoId = item.videoId
     m.player.videoTitle = item.title
@@ -46,14 +48,17 @@ sub onItemSelected()
 end sub
 
 sub onPlaybackDone()
+    print "[HomeScene] onPlaybackDone — restoring UI and focus"
     m.top.getScene().removeChild(m.player)
     m.player = invalid
-    m.top.visible = true
+    m.top.isPlaying = false
     m.videoGrid.setFocus(true)
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    if press and key = "back" then
+    print "[HomeScene] onKeyEvent key=" key " press=" press
+    keys = RemoteKeys()
+    if press and key = keys.back then
         m.top.isDone = true
         return true
     end if

@@ -21,19 +21,20 @@ sub updateHighlight()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
+    keys = RemoteKeys()
     if press then
-        if key = "OK" or key = "play" then
+        if key = keys.ok or key = keys.play then
             if m.selectedIndex = 0 then
                 selectProfile(5, "Weston")
             else
                 selectProfile(6, "Emery")
             end if
             return true
-        else if key = "right" and m.selectedIndex = 0 then
+        else if key = keys.right and m.selectedIndex = 0 then
             m.selectedIndex = 1
             updateHighlight()
             return true
-        else if key = "left" and m.selectedIndex = 1 then
+        else if key = keys.left and m.selectedIndex = 1 then
             m.selectedIndex = 0
             updateHighlight()
             return true
