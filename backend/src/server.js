@@ -222,12 +222,13 @@ app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   console.log(`[stream] Request for ${videoId}`);
   if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
+  const wasCached = innertube.getCached(videoId) !== null;
   try {
     const t0 = Date.now();
     await innertube.getStreamInfo(videoId);
-    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms`);
+    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms cached=${wasCached}`);
     const manifestUrl = `${req.protocol}://${req.headers.host}/api/manifest/${videoId}`;
-    res.json({ url: manifestUrl, type: 'dash' });
+    res.json({ url: manifestUrl, type: 'dash', cached: wasCached });
   } catch (err) {
     console.error(`[stream] Failed for ${videoId}:`, err.message);
     res.status(502).json({ error: 'Stream unavailable', detail: err.message });
