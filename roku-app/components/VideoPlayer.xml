@@ -5,6 +5,7 @@
         <field id="videoTitle" type="string" />
         <field id="isDone" type="boolean" value="false" />
     </interface>
+    <script type="text/brightscript" uri="pkg:/components/RemoteKeys.brs" />
     <script type="text/brightscript" uri="pkg:/components/VideoPlayer.brs" />
     <children>
         <Rectangle id="loadingBg" width="1280" height="720" color="0x000000FF" />
