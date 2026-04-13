@@ -26,7 +26,7 @@ function formatDuration(secs) {
 export default function Watch() {
   const { videoId }  = useParams();
   const { profileId } = useContext(ProfileContext);
-  const { openVideo, setNextVideo, fullscreen } = usePlayerContext();
+  const { openVideo, setNextVideo, setRelatedVideos, fullscreen } = usePlayerContext();
   const navigate      = useNavigate();
   const [videoMeta, setVideoMeta] = useState(null);
   const [related,   setRelated]   = useState([]);
@@ -80,6 +80,7 @@ export default function Watch() {
         setRelated(videos);
         setRelatedFilter('all');
         if (videos.length > 0) setNextVideo(videos[0]);
+        setRelatedVideos(videos);
       })
       .catch(() => {});
   }, [videoId, setNextVideo]);
