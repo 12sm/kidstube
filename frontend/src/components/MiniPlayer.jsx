@@ -87,6 +87,7 @@ export default function MiniPlayer() {
   // Settings panel
   const [showSettings, setShowSettings]     = useState(false);
   const [showDrawer, setShowDrawer]         = useState(false);
+  const [drawerFilter, setDrawerFilter]     = useState('all'); // 'all' | channelId
   const [playbackSpeed, setPlaybackSpeed]   = useState(1);
   const [playbackQuality, setPlaybackQuality] = useState('auto');
 
@@ -106,6 +107,7 @@ export default function MiniPlayer() {
     setDragTime(null);
     setShowControls(true);
     setShowDrawer(false);
+    setDrawerFilter('all');
 
     // Register for infoDelivery events once the iframe has initialised
     const listenTimer = setTimeout(() => {
@@ -450,16 +452,21 @@ export default function MiniPlayer() {
                   : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
                 }
               </button>
-              {/* Drawer toggle — only shown when related videos exist */}
+              {/* More videos pill — only shown when related videos exist */}
               {relatedVideos.length > 0 && (
                 <button
                   onClick={() => { setShowDrawer(d => !d); setShowSettings(false); resetControlsTimer(); }}
-                  className={`p-1 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`}
-                  aria-label="Video queue"
+                  className={`flex items-center gap-1.5 rounded-full pl-0.5 pr-2.5 py-0.5 transition-colors ${showControls ? 'pointer-events-auto' : 'pointer-events-none'} ${showDrawer ? 'bg-white/20' : 'bg-black/50'}`}
+                  aria-label="More videos"
                 >
-                  <svg viewBox="0 0 24 24" className={`w-5 h-5 ${showDrawer ? 'fill-white' : 'fill-white/70'}`}>
-                    <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/>
-                  </svg>
+                  {relatedVideos[0]?.thumbnail_url && (
+                    <img
+                      src={relatedVideos[0].thumbnail_url}
+                      alt=""
+                      className="w-10 h-[22px] rounded-full object-cover flex-shrink-0"
+                    />
+                  )}
+                  <span className="text-white text-xs font-medium whitespace-nowrap">More videos</span>
                 </button>
               )}
               {/* Fullscreen */}
@@ -502,57 +509,79 @@ export default function MiniPlayer() {
           </div>
 
           {/* ── Video queue drawer ── */}
-          {showDrawer && relatedVideos.length > 0 && (
-            <div
-              className="absolute bottom-12 left-0 right-0 z-30 bg-black/85 backdrop-blur-sm"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between px-4 pt-3 pb-1">
-                <span className="text-white/60 text-xs font-semibold uppercase tracking-wider">Up Next</span>
-                <button
-                  onClick={() => setShowDrawer(false)}
-                  className="text-white/60 p-1"
-                  aria-label="Close queue"
-                >
-                  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
-                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                  </svg>
-                </button>
-              </div>
+          {showDrawer && relatedVideos.length > 0 && (() => {
+            // Unique channels for filter chips
+            const channels = [];
+            const seen = new Set();
+            for (const v of relatedVideos) {
+              if (v.channel_id && !seen.has(v.channel_id)) {
+                seen.add(v.channel_id);
+                channels.push({ id: v.channel_id, name: v.channel_name });
+              }
+            }
+            const filtered = drawerFilter === 'all'
+              ? relatedVideos
+              : relatedVideos.filter(v => v.channel_id === drawerFilter);
+            return (
               <div
-                className="flex gap-3 overflow-x-auto px-4 pb-3"
-                style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
+                className="absolute inset-0 z-30 bg-black/92 backdrop-blur-sm flex flex-col"
+                onClick={e => e.stopPropagation()}
               >
-                {relatedVideos.map(video => (
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
+                  <span className="text-white text-sm font-semibold">More videos</span>
                   <button
-                    key={video.video_id}
-                    onClick={() => {
-                      openVideo(video.video_id);
-                      navigate(`/watch/${video.video_id}`);
-                      setShowDrawer(false);
-                    }}
-                    className="flex-shrink-0 w-28 text-left"
+                    onClick={() => setShowDrawer(false)}
+                    className="text-white/70 p-1"
+                    aria-label="Close"
                   >
-                    <div className="relative w-full aspect-video rounded-md overflow-hidden bg-white/10">
-                      {video.thumbnail_url && (
-                        <img
-                          src={video.thumbnail_url}
-                          alt={video.title}
-                          className="w-full h-full object-cover"
-                        />
-                      )}
-                    </div>
-                    <p className="text-white text-xs font-medium mt-1 line-clamp-2 leading-snug">
-                      {video.title}
-                    </p>
-                    <p className="text-white/50 text-xs mt-0.5 line-clamp-1">
-                      {video.channel_name}
-                    </p>
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                    </svg>
                   </button>
-                ))}
+                </div>
+                {/* Filter chips */}
+                {channels.length > 1 && (
+                  <div className="flex gap-2 px-4 pb-2 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                    <button
+                      onClick={() => setDrawerFilter('all')}
+                      className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${drawerFilter === 'all' ? 'bg-white text-black' : 'bg-white/15 text-white'}`}
+                    >All</button>
+                    {channels.map(ch => (
+                      <button
+                        key={ch.id}
+                        onClick={() => setDrawerFilter(ch.id)}
+                        className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${drawerFilter === ch.id ? 'bg-white text-black' : 'bg-white/15 text-white'}`}
+                      >From {ch.name}</button>
+                    ))}
+                  </div>
+                )}
+                {/* 2-column grid */}
+                <div
+                  className="flex-1 overflow-y-auto px-3 pb-3"
+                  style={{ scrollbarWidth: 'none' }}
+                >
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-4">
+                    {filtered.map(video => (
+                      <button
+                        key={video.video_id}
+                        onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`); setShowDrawer(false); }}
+                        className="text-left"
+                      >
+                        <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white/10">
+                          {video.thumbnail_url && (
+                            <img src={video.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        <p className="text-white text-xs font-medium mt-1.5 line-clamp-2 leading-snug">{video.title}</p>
+                        <p className="text-white/50 text-[11px] mt-0.5 line-clamp-1">{video.channel_name}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Thin progress line when controls hidden — white only, no red */}
           {!showControls && (
