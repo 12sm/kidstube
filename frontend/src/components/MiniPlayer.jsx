@@ -524,12 +524,11 @@ export default function MiniPlayer() {
               : relatedVideos.filter(v => v.channel_id === drawerFilter);
             return (
               <div
-                className="absolute inset-0 z-30 bg-black/92 backdrop-blur-sm flex flex-col"
-                style={{ height: '100%' }}
+                className="absolute inset-0 z-30 bg-black/92 backdrop-blur-sm overflow-hidden"
                 onClick={e => e.stopPropagation()}
               >
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
+                {/* Header — fixed height 44px */}
+                <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4" style={{ height: 44 }}>
                   <span className="text-white text-sm font-semibold">More videos</span>
                   <button
                     onClick={() => setShowDrawer(false)}
@@ -541,9 +540,9 @@ export default function MiniPlayer() {
                     </svg>
                   </button>
                 </div>
-                {/* Filter chips */}
+                {/* Filter chips — fixed height 36px, shown when multiple channels */}
                 {channels.length > 1 && (
-                  <div className="flex gap-2 px-4 pb-2 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                  <div className="absolute left-0 right-0 flex gap-2 px-4 overflow-x-auto" style={{ top: 44, height: 36, scrollbarWidth: 'none' }}>
                     <button
                       onClick={() => setDrawerFilter('all')}
                       className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${drawerFilter === 'all' ? 'bg-white text-black' : 'bg-white/15 text-white'}`}
@@ -557,10 +556,10 @@ export default function MiniPlayer() {
                     ))}
                   </div>
                 )}
-                {/* Horizontal scroll row */}
+                {/* Horizontal scroll row — fills remaining height via absolute top/bottom */}
                 <div
-                  className="flex-1 flex items-start gap-3 overflow-x-auto px-3 pb-3"
-                  style={{ scrollbarWidth: 'none', minHeight: 0, overscrollBehavior: 'contain', touchAction: 'pan-x' }}
+                  className="absolute left-0 right-0 bottom-0 flex items-center gap-3 overflow-x-auto px-3"
+                  style={{ top: channels.length > 1 ? 80 : 44, scrollbarWidth: 'none', overscrollBehavior: 'contain', touchAction: 'pan-x' }}
                 >
                   {filtered.map(video => (
                     <button
