@@ -556,28 +556,26 @@ export default function MiniPlayer() {
                     ))}
                   </div>
                 )}
-                {/* 2-column grid */}
+                {/* Horizontal scroll row */}
                 <div
-                  className="flex-1 overflow-y-auto px-3 pb-3"
+                  className="flex-1 flex items-start gap-3 overflow-x-auto px-3 pb-3"
                   style={{ scrollbarWidth: 'none' }}
                 >
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-                    {filtered.map(video => (
-                      <button
-                        key={video.video_id}
-                        onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`); setShowDrawer(false); }}
-                        className="text-left"
-                      >
-                        <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white/10">
-                          {video.thumbnail_url && (
-                            <img src={video.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                          )}
-                        </div>
-                        <p className="text-white text-xs font-medium mt-1.5 line-clamp-2 leading-snug">{video.title}</p>
-                        <p className="text-white/50 text-[11px] mt-0.5 line-clamp-1">{video.channel_name}</p>
-                      </button>
-                    ))}
-                  </div>
+                  {filtered.map(video => (
+                    <button
+                      key={video.video_id}
+                      onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`); setShowDrawer(false); }}
+                      className="flex-shrink-0 w-36 text-left"
+                    >
+                      <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white/10">
+                        {video.thumbnail_url && (
+                          <img src={video.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                        )}
+                      </div>
+                      <p className="text-white text-xs font-medium mt-1.5 line-clamp-2 leading-snug">{video.title}</p>
+                      <p className="text-white/50 text-[11px] mt-0.5 line-clamp-1">{video.channel_name}</p>
+                    </button>
+                  ))}
                 </div>
               </div>
             );
