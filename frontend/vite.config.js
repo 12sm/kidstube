@@ -7,13 +7,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-192.png', 'icon-512.png', 'offline.html'],
+      includeAssets: ['icon-180.png', 'icon-192.png', 'icon-512.png', 'icon.svg', 'offline.html'],
       manifest: {
-        name: 'KidsTube',
-        short_name: 'KidsTube',
-        description: 'Your videos, your way',
-        theme_color: '#0f0f0f',
-        background_color: '#0f0f0f',
+        name: 'YouTube',
+        short_name: 'YouTube',
+        description: 'Your videos',
+        theme_color: '#FF0000',
+        background_color: '#ffffff',
         display: 'standalone',
         orientation: 'any',
         start_url: '/',
@@ -23,44 +23,35 @@ export default defineConfig({
             src: 'icon-192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
           },
           {
             src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
           }
         ]
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        // Don't serve index.html for backend routes — let them hit the network
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/health/],
         runtimeCaching: [
           {
-            // Cache YouTube thumbnails
             urlPattern: /^https:\/\/i\.ytimg\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'youtube-thumbnails',
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 days
-              }
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 7 }
             }
           },
           {
-            // Cache channel avatars
             urlPattern: /^https:\/\/yt3\.ggpht\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'channel-avatars',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
-              }
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 }
             }
           }
         ]
