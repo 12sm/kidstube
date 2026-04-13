@@ -525,6 +525,7 @@ export default function MiniPlayer() {
             return (
               <div
                 className="absolute inset-0 z-30 bg-black/92 backdrop-blur-sm flex flex-col"
+                style={{ height: '100%' }}
                 onClick={e => e.stopPropagation()}
               >
                 {/* Header */}
@@ -559,7 +560,7 @@ export default function MiniPlayer() {
                 {/* Horizontal scroll row */}
                 <div
                   className="flex-1 flex items-start gap-3 overflow-x-auto px-3 pb-3"
-                  style={{ scrollbarWidth: 'none' }}
+                  style={{ scrollbarWidth: 'none', minHeight: 0, overscrollBehavior: 'contain', touchAction: 'pan-x' }}
                 >
                   {filtered.map(video => (
                     <button
