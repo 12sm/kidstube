@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- White background -->
+  <rect width="512" height="512" fill="#ffffff"/>
+  <!-- Red rounded rectangle (YouTube logo shape) -->
+  <rect x="56" y="148" width="400" height="216" rx="48" ry="48" fill="#FF0000"/>
+  <!-- White play triangle -->
+  <polygon points="196,168 196,344 372,256" fill="#ffffff"/>
+</svg>
