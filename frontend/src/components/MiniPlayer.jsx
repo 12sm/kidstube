@@ -262,6 +262,11 @@ export default function MiniPlayer() {
     transition: 'none',
   };
 
+  // Drawer overlays exactly the same area as the video — derived from the active container style
+  const drawerStyle = showFullViewport
+    ? { position: 'fixed', top: 0, left: 0, width: dims.w, height: dims.h, zIndex: 55 }
+    : { position: 'fixed', top: fullTop, left: 0, width: fullW, height: Math.round(fullW * 9 / 16), zIndex: 55 };
+
   const miniTop  = dims.h - safeBottom - BOTTOM_NAV_H - MINI_H - 4;
   const miniLeft = dims.w - 16 - MINI_W;
   const miniStyle = {
@@ -524,7 +529,8 @@ export default function MiniPlayer() {
               : relatedVideos.filter(v => v.channel_id === drawerFilter);
             return (
               <div
-                className="absolute inset-0 z-30 bg-black/92 backdrop-blur-sm overflow-hidden"
+                className="bg-black/92 backdrop-blur-sm overflow-hidden"
+                style={drawerStyle}
                 onClick={e => e.stopPropagation()}
               >
                 {/* Header — fixed height 44px */}
