@@ -118,13 +118,15 @@ export default function MiniPlayer() {
     return () => clearTimeout(listenTimer);
   }, [videoId]);
 
-  // Keep controls pinned open while drawer is visible
+  // Keep controls pinned open while drawer is visible; resume auto-hide when it closes
   useEffect(() => {
     if (showDrawer) {
       clearTimeout(controlsTimerRef.current);
       setShowControls(true);
+    } else if (playingRef.current) {
+      resetControlsTimer();
     }
-  }, [showDrawer]);
+  }, [showDrawer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show controls when paused; start hide-timer when playing
   useEffect(() => {
