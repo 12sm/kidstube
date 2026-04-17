@@ -48,6 +48,9 @@ export default function Watch() {
   const [relatedFilter,  setRelatedFilter]  = useState('all'); // 'all' | channelId
   const [reaction, setReaction] = useState(null); // null | 'like' | 'dislike'
 
+  const mobileScrollRef  = useRef(null);
+  const sidebarScrollRef = useRef(null);
+
   const handleReact = (r) => {
     const next = reaction === r ? null : r; // toggle off if same
     setReaction(next);
@@ -74,6 +77,9 @@ export default function Watch() {
     if (videoId && videoId !== activeVideoId) openVideo(videoId);
     setVideoEnded(false);
     setReaction(null); // reset on new video
+    // Reset scroll position on both the mobile content area and desktop sidebar
+    mobileScrollRef.current?.scrollTo({ top: 0 });
+    sidebarScrollRef.current?.scrollTo({ top: 0 });
   }, [videoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -190,6 +196,7 @@ export default function Watch() {
           {/* Scrollable content below the video (mobile).
               On desktop this is just a normal block. */}
           <div
+            ref={mobileScrollRef}
             className="flex-1 overflow-y-auto"
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
@@ -329,7 +336,7 @@ export default function Watch() {
 
         {/* Up Next — iPad/desktop sidebar (hidden in fullscreen) */}
         {!fullscreen && related.length > 0 && (
-          <div className="hidden lg:flex lg:flex-col lg:w-[32%] lg:flex-shrink-0 lg:overflow-y-auto lg:px-4 lg:py-4">
+          <div ref={sidebarScrollRef} className="hidden lg:flex lg:flex-col lg:w-[32%] lg:flex-shrink-0 lg:overflow-y-auto lg:px-4 lg:py-4">
             <h2 className="text-yt-muted text-xs font-semibold uppercase tracking-wider mb-3">Up Next</h2>
             <div className="space-y-4">
               {related.map(video => (
