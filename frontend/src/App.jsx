@@ -63,7 +63,7 @@ export default function App() {
         <BrowserRouter>
           <OfflineBanner />
           <Routes>
-            <Route path="/"                  element={<ProfileSelect />} />
+            <Route path="/"                  element={profileState.profileId ? <Navigate to="/home" replace /> : <ProfileSelect />} />
             <Route path="/home"              element={<Home key="home" />} />
             <Route path="/shorts"            element={<Home key="shorts" />} />
             <Route path="/channels"           element={<Channels />} />

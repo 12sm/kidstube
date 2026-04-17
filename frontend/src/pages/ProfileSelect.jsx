@@ -2,7 +2,8 @@ import React, { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProfileContext } from '../App.jsx';
 
-const AVATAR_COLORS = ['#e05252', '#4e9de0', '#50c878', '#e0a035', '#9b59b6', '#e07c4e'];
+const PROFILE_COLORS = { 5: '#2eaa5c', 6: '#d4620e' };
+const AVATAR_COLORS  = ['#e05252', '#4e9de0', '#50c878', '#e0a035', '#9b59b6', '#e07c4e'];
 
 export default function ProfileSelect() {
   const { selectProfile } = useContext(ProfileContext);
@@ -53,8 +54,8 @@ export default function ProfileSelect() {
               className="flex flex-col items-center gap-3 group"
             >
               <div
-                className="w-32 h-32 rounded-2xl flex items-center justify-center text-5xl font-bold text-white shadow-lg group-hover:scale-105 group-hover:shadow-2xl transition-all duration-200"
-                style={{ backgroundColor: AVATAR_COLORS[i % AVATAR_COLORS.length] }}
+                className="w-32 h-32 rounded-full flex items-center justify-center text-5xl font-bold text-white shadow-lg group-hover:scale-105 group-hover:shadow-2xl transition-all duration-200"
+                style={{ backgroundColor: PROFILE_COLORS[profile.id] ?? AVATAR_COLORS[i % AVATAR_COLORS.length] }}
               >
                 {profile.name.charAt(0).toUpperCase()}
               </div>

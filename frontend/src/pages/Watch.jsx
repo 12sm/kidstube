@@ -23,11 +23,24 @@ function formatDuration(secs) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function readSafeArea(prop) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;top:0;left:0;height:0;padding-top:env(${prop},0px)`;
+  document.body.appendChild(el);
+  const val = parseInt(getComputedStyle(el).paddingTop) || 0;
+  document.body.removeChild(el);
+  return val;
+}
+
 export default function Watch() {
   const { videoId }  = useParams();
   const { profileId } = useContext(ProfileContext);
-  const { openVideo, setNextVideo, fullscreen } = usePlayerContext();
+  const { openVideo, setNextVideo, setRelatedVideos, fullscreen } = usePlayerContext();
   const navigate      = useNavigate();
+  // On iPad (lg:) use the actual iOS safe-area-inset-top; on mobile use the fixed header height
+  const [topPad] = useState(() =>
+    window.innerWidth >= 1024 ? readSafeArea('safe-area-inset-top') : 59
+  );
   const [videoMeta, setVideoMeta] = useState(null);
   const [related,   setRelated]   = useState([]);
   const [videoEnded, setVideoEnded] = useState(false);
@@ -80,6 +93,7 @@ export default function Watch() {
         setRelated(videos);
         setRelatedFilter('all');
         if (videos.length > 0) setNextVideo(videos[0]);
+        setRelatedVideos(videos);
       })
       .catch(() => {});
   }, [videoId, setNextVideo]);
@@ -135,7 +149,7 @@ export default function Watch() {
     /* On mobile: full-height flex column so the content below the video
        lives in its own scroll container and can never scroll behind the
        fixed MiniPlayer.  On desktop: revert to normal block layout. */
-    <div className="bg-yt-bg flex flex-col h-dvh pt-[59px] lg:pt-0">
+    <div className="bg-yt-bg flex flex-col h-dvh" style={{ paddingTop: topPad }}>
       <div className="flex flex-col flex-1 overflow-hidden lg:flex-row">
 
         <div className={`flex flex-col flex-1 overflow-hidden lg:flex-shrink-0 min-w-0 ${fullscreen ? 'lg:w-full' : 'lg:w-[68%]'}`}>
@@ -143,7 +157,7 @@ export default function Watch() {
           {/* Video spacer — MiniPlayer overlays this area in full mode.
               flex-shrink-0 keeps it from being squeezed by the scroll container.
               The back + minimize buttons live inside MiniPlayer's overlay. */}
-          <div className="relative w-full aspect-video bg-black flex-shrink-0 lg:rounded-xl">
+          <div className="relative w-full aspect-video bg-yt-bg flex-shrink-0 lg:rounded-xl">
             {/* ── End-screen overlay — shown when video finishes ── */}
             {videoEnded && related.length > 0 && (
               <div className="absolute inset-0 z-50 bg-black/95 lg:rounded-xl flex flex-col justify-center">
