@@ -536,7 +536,9 @@ function upsertWatchHistory(profileId, videoId, progressSeconds, durationSeconds
     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(profile_id, video_id) DO UPDATE SET
       progress_seconds = excluded.progress_seconds,
-      duration_seconds = excluded.duration_seconds,
+      duration_seconds = CASE WHEN excluded.duration_seconds > 0
+                         THEN excluded.duration_seconds
+                         ELSE duration_seconds END,
       watched_at       = CURRENT_TIMESTAMP
   `).run(profileId, videoId, progressSeconds, durationSeconds);
 }

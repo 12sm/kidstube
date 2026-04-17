@@ -98,7 +98,7 @@ export default function Watch() {
       .catch(() => {});
   }, [videoId, setNextVideo]);
 
-  // Record video in history immediately on open, then update progress periodically
+  // Record watch progress — first write happens at the 15s interval tick
   useEffect(() => {
     if (!videoId || !profileId) return;
 
@@ -111,9 +111,6 @@ export default function Watch() {
       }).catch(() => {});
     };
 
-    // Record immediately so it always shows in history
-    save();
-
     // Listen for YouTube iframe time updates + video end
     const onMessage = (e) => {
       if (!String(e.origin).includes('youtube.com')) return;
@@ -122,7 +119,9 @@ export default function Watch() {
       if (data?.event === 'infoDelivery' && data?.info) {
         const cur = data.info.currentTime;
         const dur = data.info.duration;
-        if (cur > 0) progressRef.current = { current: Math.floor(cur), duration: Math.floor(dur || 0) };
+        // Capture duration independently — don't wait for currentTime > 0
+        if (typeof cur === 'number' && cur > 0) progressRef.current.current = Math.floor(cur);
+        if (typeof dur === 'number' && dur > 0) progressRef.current.duration = Math.floor(dur);
         // Show our end-screen 20s before video ends to block YouTube's end-card overlays
         if (cur > 0 && dur > 30) {
           if (dur - cur <= 20) setVideoEnded(true);

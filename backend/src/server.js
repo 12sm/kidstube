@@ -279,6 +279,10 @@ app.post('/api/watch-history', (req, res) => {
   const progressSecs = Math.floor(progress_seconds || 0);
   const durationSecs = Math.floor(duration_seconds || 0);
 
+  // Ignore saves below 15 seconds — filters out scroll-by events and
+  // the initial open before YouTube has sent any progress data.
+  if (progressSecs < 15) return res.json({ ok: true });
+
   db.upsertWatchHistory(profileId, video_id, progressSecs, durationSecs);
   db.applyCompletionToInterests(profileId, video_id, progressSecs, durationSecs);
 
