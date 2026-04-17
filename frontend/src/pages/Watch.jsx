@@ -77,9 +77,6 @@ export default function Watch() {
     if (videoId && videoId !== activeVideoId) openVideo(videoId);
     setVideoEnded(false);
     setReaction(null); // reset on new video
-    // Reset scroll position on both the mobile content area and desktop sidebar
-    mobileScrollRef.current?.scrollTo({ top: 0 });
-    sidebarScrollRef.current?.scrollTo({ top: 0 });
   }, [videoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -100,6 +97,10 @@ export default function Watch() {
         setRelatedFilter('all');
         if (videos.length > 0) setNextVideo(videos[0]);
         setRelatedVideos(videos);
+        // Scroll both panels to top once new recommendations are ready —
+        // fires together with the content swap so there's no stale-content flash.
+        mobileScrollRef.current?.scrollTo({ top: 0 });
+        sidebarScrollRef.current?.scrollTo({ top: 0 });
       })
       .catch(() => {});
   }, [videoId, setNextVideo]);
