@@ -415,7 +415,8 @@ function VideoModal({ video, onClose, onFlip, acting }) {
 function VideoLibrary() {
   const [profiles,  setProfiles]  = useState([]);
   const [profileId, setProfileId] = useState(null); // null = all
-  const [status,    setStatus]    = useState('all');
+  const [status,          setStatus]          = useState('all');
+  const [rejectionFilter, setRejectionFilter] = useState('all');
   const [search,    setSearch]    = useState('');
   const [query,     setQuery]     = useState('');
   const [page,      setPage]      = useState(0);
@@ -444,11 +445,12 @@ function VideoLibrary() {
     const params = new URLSearchParams({ status, page, limit: 25 });
     if (query) params.set('search', query);
     if (profileId) params.set('profile_id', profileId);
+    if (status === 'rejected' && rejectionFilter !== 'all') params.set('rejection_filter', rejectionFilter);
     fetch(`/api/admin/library?${params}`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [status, page, query, profileId]);
+  }, [status, page, query, profileId, rejectionFilter]);
 
   const flip = async (videoId, currentStatus) => {
     setActing(videoId);
@@ -560,7 +562,7 @@ function VideoLibrary() {
           {[['all','All'],['approved','Approved'],['rejected','Rejected']].map(([key, label]) => (
             <button
               key={key}
-              onClick={() => { setStatus(key); setPage(0); }}
+              onClick={() => { setStatus(key); setRejectionFilter('all'); setPage(0); }}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                 status === key ? 'bg-blue-600 text-white' : 'bg-yt-card text-yt-muted hover:text-yt-text'
               }`}
@@ -572,6 +574,35 @@ function VideoLibrary() {
 
         {data && <span className="text-yt-muted text-xs ml-1">{data.total.toLocaleString()} videos</span>}
       </div>
+
+      {/* Rejection sub-filters — only shown when Rejected tab is active */}
+      {status === 'rejected' && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-yt-muted text-xs">Reason:</span>
+          <div className="flex gap-1 flex-wrap">
+            {[
+              ['all',     'All'],
+              ['shorts',  'Shorts'],
+              ['live',    'Live'],
+              ['keyword', 'Keyword'],
+              ['llm',     'LLM'],
+              ['manual',  'Manual'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => { setRejectionFilter(key); setPage(0); }}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  rejectionFilter === key
+                    ? 'bg-red-700 text-white'
+                    : 'bg-yt-card text-yt-muted hover:text-yt-text border border-yt-border'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       {loading && <p className="text-yt-muted text-sm">Loading...</p>}

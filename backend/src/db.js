@@ -361,6 +361,15 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
     SELECT v.*, c.thumbnail_url as channel_thumbnail_img
     FROM videos v
     LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
+    LEFT JOIN (
+      SELECT video_id,
+        SUM(CASE WHEN duration_seconds > 0
+              THEN MIN(CAST(progress_seconds AS REAL) / duration_seconds, 1.0)
+              ELSE 0 END) as recent_completed
+      FROM watch_history
+      WHERE profile_id = ? AND watched_at > datetime('now', '-30 days')
+      GROUP BY video_id
+    ) wh ON v.video_id = wh.video_id
     WHERE v.channel_id IN (${placeholders})
       AND v.status = 'approved'
       AND v.video_id NOT IN (
@@ -368,9 +377,12 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
         WHERE rule_type = 'video_block'
           AND (profile_id = ? OR profile_id IS NULL)
       )
-    ORDER BY v.published_at DESC
+    ORDER BY
+      CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 2.0 ELSE 1.0 END
+      * (1.0 / (1.0 + COALESCE(wh.recent_completed, 0) * 0.5))
+      * (ABS(RANDOM()) / 9223372036854775807.0) DESC
     LIMIT ? OFFSET ?
-  `).all([...channelIds, profileId, limit, offset]);
+  `).all([profileId, ...channelIds, profileId, limit, offset]);
 }
 
 function blockVideo(profileId, videoId) {
@@ -410,7 +422,7 @@ function getRelatedVideos(videoId) {
   `).all(videoId);
   if (sourced.length > 0) return sourced;
 
-  // Fall back: other approved videos from the same channel
+  // Fall back: other approved videos from the same channel, randomized
   const row = getDb().prepare('SELECT channel_id FROM videos WHERE video_id = ?').get(videoId);
   if (!row) return [];
   return getDb().prepare(`
@@ -418,7 +430,7 @@ function getRelatedVideos(videoId) {
     FROM videos v
     LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
     WHERE v.channel_id = ? AND v.video_id != ? AND v.status = 'approved'
-    ORDER BY v.published_at DESC
+    ORDER BY RANDOM()
     LIMIT 15
   `).all(row.channel_id, videoId);
 }
@@ -449,7 +461,7 @@ function getRejectedVideos(limit = 50) {
   `).all(limit);
 }
 
-function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '', profileId = null } = {}) {
+function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '', profileId = null, rejectionFilter = 'all' } = {}) {
   const rawDb = getDb();
   const conditions = [];
   const params = [];
@@ -461,6 +473,19 @@ function getVideoLibrary({ status = 'all', page = 0, limit = 25, search = '', pr
   if (status !== 'all') {
     conditions.push('v.status = ?');
     params.push(status);
+  }
+  if (status === 'rejected' && rejectionFilter !== 'all') {
+    if (rejectionFilter === 'shorts') {
+      conditions.push("v.rejection_reason = 'YouTube Short'");
+    } else if (rejectionFilter === 'live') {
+      conditions.push("(v.rejection_reason = 'YouTube Live' OR v.rejection_reason LIKE 'Keyword: \"LIVE\"%')");
+    } else if (rejectionFilter === 'keyword') {
+      conditions.push("v.rejection_reason LIKE 'Keyword:%' AND v.rejection_reason NOT LIKE 'Keyword: \"LIVE\"%'");
+    } else if (rejectionFilter === 'llm') {
+      conditions.push("v.rejection_reason LIKE 'LLM:%'");
+    } else if (rejectionFilter === 'manual') {
+      conditions.push("v.rejection_reason LIKE 'Manual%'");
+    }
   }
   if (search) {
     conditions.push('(v.title LIKE ? OR v.channel_name LIKE ?)');
@@ -866,9 +891,37 @@ function searchApprovedVideos(profileId, q) {
         SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1
       )
       AND (v.title LIKE ? OR v.channel_name LIKE ? OR v.description LIKE ?)
-    ORDER BY v.published_at DESC
+    ORDER BY
+      CASE WHEN v.title LIKE ? THEN 0
+           WHEN v.channel_name LIKE ? THEN 1
+           ELSE 2 END,
+      v.published_at DESC
     LIMIT 20
-  `).all(profileId, like, like, like);
+  `).all(profileId, like, like, like, like, like);
+}
+
+// Lightweight suggestions for as-you-type autocomplete.
+// Returns up to 5 distinct video titles and 3 channel names matching the prefix.
+function getSearchSuggestions(profileId, q) {
+  const like = `${q}%`;
+  const titleRows = getDb().prepare(`
+    SELECT DISTINCT title as text, 'video' as type
+    FROM videos
+    WHERE status = 'approved'
+      AND channel_id IN (SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1)
+      AND title LIKE ?
+    ORDER BY published_at DESC
+    LIMIT 5
+  `).all(profileId, like);
+
+  const channelRows = getDb().prepare(`
+    SELECT DISTINCT channel_name as text, 'channel' as type
+    FROM channels
+    WHERE profile_id = ? AND whitelisted = 1 AND channel_name LIKE ?
+    LIMIT 3
+  `).all(profileId, like);
+
+  return [...channelRows, ...titleRows];
 }
 
 // Bulk apply: if channelIds provided applies only those, otherwise applies all actionable pending recs.
@@ -992,4 +1045,5 @@ module.exports = {
   getSearchHistory,
   deleteSearchQuery,
   searchApprovedVideos,
+  getSearchSuggestions,
 };

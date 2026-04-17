@@ -57,11 +57,13 @@ export default function MiniPlayer() {
 
   const [safeTop]    = useState(59);
   const [safeBottom] = useState(34);
+  const [ipSafeTop]  = useState(() => readSafeArea('safe-area-inset-top'));
   const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [countdown, setCountdown]   = useState(null);
 
-  const countdownRef  = useRef(null);
-  const iframeRef     = useRef(null);
+  const countdownRef    = useRef(null);
+  const iframeRef       = useRef(null);
+  const gestureLayerRef = useRef(null);
   const touchStartY   = useRef(0);
   const touchStartX   = useRef(0);
   const touchStartT   = useRef(0);
@@ -149,6 +151,41 @@ export default function MiniPlayer() {
     return () => clearInterval(id);
   }, [playing, duration]);
 
+  // Screen Wake Lock — keep the screen on while a video is playing.
+  // Supported on iOS 16.4+ in PWA standalone mode.
+  // Wake locks are automatically released when the page is hidden, so we
+  // re-request when the page becomes visible again and video is still playing.
+  useEffect(() => {
+    if (!('wakeLock' in navigator)) return;
+    let lock = null;
+
+    const request = async () => {
+      try {
+        lock = await navigator.wakeLock.request('screen');
+      } catch (_) { /* denied or unavailable — silently ignore */ }
+    };
+
+    const release = () => {
+      lock?.release();
+      lock = null;
+    };
+
+    // Re-request after the page comes back into view (wake lock releases on hide)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && playingRef.current) request();
+    };
+
+    if (playing) {
+      request();
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    return () => {
+      release();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [playing]);
+
   useEffect(() => {
     const onResize = () => {
       setDims({ w: window.innerWidth, h: window.innerHeight });
@@ -157,6 +194,16 @@ export default function MiniPlayer() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // Focus the gesture layer whenever we enter full-mode on the Watch page so that
+  // keyboard events (spacebar) are captured by it rather than stolen by the iframe.
+  useEffect(() => {
+    if (minimized || !location.pathname.startsWith('/watch/')) return;
+    const timer = setTimeout(() => {
+      gestureLayerRef.current?.focus({ preventScroll: true });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [minimized, location.pathname, videoId]);
 
   // YouTube postMessage listener
   useEffect(() => {
@@ -246,7 +293,7 @@ export default function MiniPlayer() {
   // Landscape fill only applies to phones — iPad uses the 63/37 split regardless of orientation
   const showLandscape = landscape && !!videoId && !minimized && !isWide;
   const fullW   = isWide ? Math.round(dims.w * 0.68) : dims.w;
-  const fullTop = isWide ? 0 : safeTop;
+  const fullTop = isWide ? ipSafeTop : safeTop;
 
   const fullStyle = {
     position: 'fixed', top: fullTop, left: 0,
@@ -295,8 +342,16 @@ export default function MiniPlayer() {
     if (swipeDelta.current > 70) {
       didMinimize.current = true;
       cancelCountdown();
-      minimize();
-      navigate('/home');
+      if (fullscreen) {
+        // First pull-down: exit fullscreen only — stay on watch page
+        exitFullscreen();
+        screen.orientation?.unlock?.();
+        setShowDrawer(false);
+      } else {
+        // Second pull-down (already in normal view): minimize and go back
+        minimize();
+        navigate(-1);
+      }
     }
   };
   const onTouchEnd = (e) => {
@@ -358,14 +413,25 @@ export default function MiniPlayer() {
         className="w-full h-full border-0"
         allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
         allowFullScreen
+        tabIndex={-1}
         title="Video player"
       />
 
       {/* ── Full-mode custom controls ── */}
       {showCustomControls && (
         <>
-          {/* Gesture layer — full video area. Swipe down = minimize, tap = toggle controls */}
-          <div className="absolute inset-0 z-10" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} />
+          {/* Gesture layer — full video area. Swipe down = minimize, tap = toggle controls.
+              tabIndex={0} + outline-none makes it the keyboard focus target so spacebar
+              events land here instead of the iframe. */}
+          <div
+            ref={gestureLayerRef}
+            tabIndex={0}
+            className="absolute inset-0 z-10 outline-none"
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onKeyDown={(e) => { if (e.code === 'Space') { e.preventDefault(); handlePlayPause(); } }}
+          />
 
           {/* ── Settings panel (slides up from bottom) ── */}
           {showSettings && (
@@ -399,7 +465,7 @@ export default function MiniPlayer() {
             className={`absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 h-12 pointer-events-none transition-opacity duration-200 ${showControls ? 'opacity-100' : 'opacity-0'}`}
             style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)' }}
           >
-            <button onClick={() => { cancelCountdown(); exitFullscreen(); screen.orientation?.unlock?.(); minimize(); navigate('/home'); }}
+            <button onClick={() => { cancelCountdown(); exitFullscreen(); screen.orientation?.unlock?.(); minimize(); navigate(-1); }}
               className={`text-white p-1 ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-label="Minimize">
               <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
             </button>
@@ -457,11 +523,11 @@ export default function MiniPlayer() {
                   : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
                 }
               </button>
-              {/* More videos pill — only shown when related videos exist */}
+              {/* More videos pill — only shown when related videos exist; hidden on lg (iPad has sidebar) */}
               {relatedVideos.length > 0 && (
                 <button
                   onClick={() => { setShowDrawer(d => !d); setShowSettings(false); resetControlsTimer(); }}
-                  className={`flex items-center gap-1.5 rounded-full pl-0.5 pr-2.5 py-0.5 transition-colors ${showControls ? 'pointer-events-auto' : 'pointer-events-none'} ${showDrawer ? 'bg-white/20' : 'bg-black/50'}`}
+                  className={`lg:hidden flex items-center gap-1.5 rounded-full pl-0.5 pr-2.5 py-0.5 transition-colors ${showControls ? 'pointer-events-auto' : 'pointer-events-none'} ${showDrawer ? 'bg-white/20' : 'bg-black/50'}`}
                   aria-label="More videos"
                 >
                   {relatedVideos[0]?.thumbnail_url && (
@@ -571,7 +637,7 @@ export default function MiniPlayer() {
                     <button
                       key={video.video_id}
                       onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`); setShowDrawer(false); }}
-                      className="flex-shrink-0 w-36 text-left"
+                      className={`flex-shrink-0 text-left ${landscape ? 'w-[19rem]' : 'w-36'}`}
                     >
                       <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white/10">
                         {video.thumbnail_url && (
