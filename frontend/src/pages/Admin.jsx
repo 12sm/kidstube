@@ -1805,6 +1805,155 @@ function ChildProfileSetup({ profile, onComplete }) {
   );
 }
 
+function InterestTagSettings({ profile }) {
+  const [ceiling, setCeiling]           = useState(10);
+  const [ceilingDraft, setCeilingDraft] = useState('10');
+  const [settings, setSettings]         = useState({});
+  const [interests, setInterests]       = useState([]);
+  const [saving, setSaving]             = useState(null);
+  const [drafts, setDrafts]             = useState({});
+
+  useEffect(() => {
+    fetch(`/api/admin/tag-settings/${profile.id}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => {
+        setCeiling(d.ceiling);
+        setCeilingDraft(String(d.ceiling));
+        const map = {};
+        for (const s of d.settings) map[s.tag] = { multiplier: s.multiplier, hard_cap: s.hard_cap };
+        setSettings(map);
+        setDrafts(map);
+      })
+      .catch(() => {});
+
+    fetch(`/api/admin/interests/${profile.id}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setInterests(d.interests || []))
+      .catch(() => {});
+  }, [profile.id]);
+
+  const saveCeiling = async () => {
+    const val = parseFloat(ceilingDraft);
+    if (isNaN(val) || val <= 0) return;
+    setSaving('ceiling');
+    await fetch(`/api/admin/behavior-ceiling/${profile.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ceiling: val }),
+    }).catch(() => {});
+    setCeiling(val);
+    setSaving(null);
+  };
+
+  const saveTagSetting = async (tag) => {
+    const d = drafts[tag] || { multiplier: 1.0, hard_cap: null };
+    setSaving(tag);
+    await fetch(`/api/admin/tag-settings/${profile.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tag, multiplier: d.multiplier, hard_cap: d.hard_cap }),
+    }).catch(() => {});
+    setSettings(prev => ({ ...prev, [tag]: d }));
+    setSaving(null);
+  };
+
+  const setDraft = (tag, field, value) => {
+    setDrafts(prev => ({
+      ...prev,
+      [tag]: { ...(prev[tag] || { multiplier: 1.0, hard_cap: null }), [field]: value },
+    }));
+  };
+
+  const effectiveWeight = (raw, tag) => {
+    const d = drafts[tag] || { multiplier: 1.0, hard_cap: null };
+    const scaled = raw * (d.multiplier ?? 1.0);
+    const cap = d.hard_cap !== null && d.hard_cap !== '' ? Math.min(parseFloat(d.hard_cap), ceiling) : ceiling;
+    return Math.min(scaled, cap);
+  };
+
+  const behaviorInterests = interests.filter(i => i.source === 'behavior' && i.weight > 0);
+
+  return (
+    <div className="bg-yt-card rounded-xl p-5 space-y-4">
+      <p className="text-yt-text font-medium text-sm">Interest Weight Controls</p>
+
+      {/* Global ceiling */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-yt-muted text-sm flex-shrink-0">Behavior ceiling</span>
+        <input
+          type="number"
+          min="0.1"
+          step="0.5"
+          value={ceilingDraft}
+          onChange={e => setCeilingDraft(e.target.value)}
+          className="w-20 bg-yt-surface border border-yt-border rounded-lg px-2 py-1 text-yt-text text-sm text-center focus:outline-none"
+        />
+        <button
+          onClick={saveCeiling}
+          disabled={saving === 'ceiling'}
+          className="px-3 py-1 bg-yt-surface border border-yt-border text-yt-text rounded-lg text-xs disabled:opacity-50"
+        >
+          {saving === 'ceiling' ? 'Saving…' : 'Save'}
+        </button>
+        <span className="text-yt-muted text-xs">No behavior tag exceeds this</span>
+      </div>
+
+      {/* Per-tag rows */}
+      {behaviorInterests.length === 0 && (
+        <p className="text-yt-muted text-xs">No behavior interests recorded yet.</p>
+      )}
+      {behaviorInterests.map(interest => {
+        const d = drafts[interest.tag] || { multiplier: 1.0, hard_cap: null };
+        const eff = effectiveWeight(interest.weight, interest.tag);
+        const changed = Math.abs(eff - interest.weight) > 0.01;
+        return (
+          <div key={interest.tag} className="flex items-center gap-3 flex-wrap">
+            <span className="text-yt-text text-sm w-36 truncate flex-shrink-0">{interest.tag}</span>
+            <span className="text-yt-muted text-xs w-24 flex-shrink-0">
+              raw {interest.weight.toFixed(2)}
+              {changed && (
+                <span className="text-yt-red ml-1">→ {eff.toFixed(2)}</span>
+              )}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="0"
+                step="0.05"
+                value={d.multiplier ?? 1.0}
+                onChange={e => setDraft(interest.tag, 'multiplier', parseFloat(e.target.value) || 1.0)}
+                className="w-16 bg-yt-surface border border-yt-border rounded px-2 py-0.5 text-yt-text text-xs text-center focus:outline-none"
+              />
+              <span className="text-yt-muted text-xs">×</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-yt-muted text-xs">cap</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                placeholder="—"
+                value={d.hard_cap ?? ''}
+                onChange={e => setDraft(interest.tag, 'hard_cap', e.target.value === '' ? null : parseFloat(e.target.value))}
+                className="w-16 bg-yt-surface border border-yt-border rounded px-2 py-0.5 text-yt-text text-xs text-center focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={() => saveTagSetting(interest.tag)}
+              disabled={saving === interest.tag}
+              className="px-3 py-0.5 bg-yt-surface border border-yt-border text-yt-text rounded text-xs disabled:opacity-50"
+            >
+              {saving === interest.tag ? '…' : 'Save'}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ChildProfileSection({ profile }) {
   const [profileData, setProfileData] = useState(null);
   const [editing, setEditing]         = useState(false);
@@ -1913,6 +2062,8 @@ function ChildProfileSection({ profile }) {
           </ul>
         </div>
       )}
+
+      <InterestTagSettings profile={profile} />
 
       <button
         onClick={handleConsolidate}

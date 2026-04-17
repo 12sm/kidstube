@@ -246,6 +246,28 @@ function migrate() {
     console.log('Videos table: added needs_llm_review column');
   }
 
+  // Migrate: add behavior_weight_ceiling to profiles
+  const profileCols = db.pragma('table_info(profiles)').map(c => c.name);
+  if (!profileCols.includes('behavior_weight_ceiling')) {
+    db.exec(`ALTER TABLE profiles ADD COLUMN behavior_weight_ceiling REAL NOT NULL DEFAULT 10.0`);
+    console.log('Profiles table: added behavior_weight_ceiling column');
+  }
+
+  // Migrate: interest_tag_settings table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS interest_tag_settings (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id  INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      tag         TEXT NOT NULL,
+      multiplier  REAL NOT NULL DEFAULT 1.0,
+      hard_cap    REAL,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(profile_id, tag)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tag_settings_profile ON interest_tag_settings(profile_id);
+  `);
+
   console.log('Database migrated successfully');
 }
 
@@ -689,6 +711,72 @@ function profileHadSessionToday(profileId, today) {
   return row.count > 0;
 }
 
+// --- Interest tag settings (parent-configured ceilings / multipliers) ---
+
+function getProfileBehaviorCeiling(profileId) {
+  const row = getDb().prepare(
+    'SELECT behavior_weight_ceiling FROM profiles WHERE id = ?'
+  ).get(profileId);
+  return row ? row.behavior_weight_ceiling : 10.0;
+}
+
+function setProfileBehaviorCeiling(profileId, ceiling) {
+  getDb().prepare(
+    'UPDATE profiles SET behavior_weight_ceiling = ? WHERE id = ?'
+  ).run(ceiling, profileId);
+}
+
+function getTagSettings(profileId) {
+  const rows = getDb().prepare(
+    'SELECT tag, multiplier, hard_cap FROM interest_tag_settings WHERE profile_id = ?'
+  ).all(profileId);
+  const map = {};
+  for (const r of rows) map[r.tag] = { multiplier: r.multiplier, hard_cap: r.hard_cap };
+  return map;
+}
+
+function upsertTagSetting(profileId, tag, multiplier, hardCap) {
+  getDb().prepare(`
+    INSERT INTO interest_tag_settings (profile_id, tag, multiplier, hard_cap, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(profile_id, tag) DO UPDATE SET
+      multiplier = excluded.multiplier,
+      hard_cap   = excluded.hard_cap,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(profileId, tag, multiplier, hardCap ?? null);
+}
+
+function deleteTagSetting(profileId, tag) {
+  getDb().prepare(
+    'DELETE FROM interest_tag_settings WHERE profile_id = ? AND tag = ?'
+  ).run(profileId, tag);
+}
+
+function getEffectiveInterests(profileId) {
+  const ceiling  = getProfileBehaviorCeiling(profileId);
+  const settings = getTagSettings(profileId);
+
+  const rows = getDb().prepare(`
+    SELECT tag, weight, source, last_seen
+    FROM profile_interests
+    WHERE profile_id = ?
+    ORDER BY weight DESC
+  `).all(profileId);
+
+  return rows.map(row => {
+    if (row.source !== 'behavior') {
+      // Parent-set interests pass through unchanged
+      return { ...row, effective_weight: row.weight };
+    }
+    const s = settings[row.tag];
+    const multiplier = s?.multiplier ?? 1.0;
+    const hardCap    = s?.hard_cap ?? null;
+    const scaled     = row.weight * multiplier;
+    const capBound   = hardCap !== null ? Math.min(hardCap, ceiling) : ceiling;
+    return { ...row, effective_weight: Math.min(scaled, capBound) };
+  }).sort((a, b) => b.effective_weight - a.effective_weight);
+}
+
 // --- Profile insights ---
 
 function insertProfileInsight(profileId, insight, source) {
@@ -1036,6 +1124,12 @@ module.exports = {
   getTagStatsByDay,
   applyReactionToInterests,
   applyCompletionToInterests,
+  getProfileBehaviorCeiling,
+  setProfileBehaviorCeiling,
+  getTagSettings,
+  upsertTagSetting,
+  deleteTagSetting,
+  getEffectiveInterests,
   upsertChannelRecommendation,
   getChannelRecommendations,
   getAllChannelRecommendations,

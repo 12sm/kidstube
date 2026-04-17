@@ -409,6 +409,46 @@ app.get('/api/search/suggestions', (req, res) => {
   res.json({ suggestions: db.getSearchSuggestions(profileId, q) });
 });
 
+// ── Interest Tag Settings ─────────────────────────────────────────────────────
+
+app.get('/api/admin/interests/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const interests = db.getDb().prepare(
+    'SELECT tag, weight, source, last_seen FROM profile_interests WHERE profile_id = ? ORDER BY weight DESC'
+  ).all(profileId);
+  res.json({ interests });
+});
+
+app.get('/api/admin/tag-settings/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const ceiling  = db.getProfileBehaviorCeiling(profileId);
+  const settings = db.getTagSettings(profileId);
+  const list = Object.entries(settings).map(([tag, s]) => ({ tag, ...s }));
+  res.json({ ceiling, settings: list });
+});
+
+app.post('/api/admin/tag-settings/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { tag, multiplier, hard_cap } = req.body;
+  if (!tag) return res.status(400).json({ error: 'Missing tag' });
+  db.upsertTagSetting(profileId, tag, multiplier ?? 1.0, hard_cap ?? null);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/tag-settings/:profileId/:tag', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  db.deleteTagSetting(profileId, req.params.tag);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/behavior-ceiling/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { ceiling } = req.body;
+  if (ceiling === undefined || isNaN(ceiling)) return res.status(400).json({ error: 'Invalid ceiling' });
+  db.setProfileBehaviorCeiling(profileId, parseFloat(ceiling));
+  res.json({ ok: true });
+});
+
 // ── Channel Discovery ────────────────────────────────────────────────────────
 
 app.post('/api/admin/discover/channels', requireAdmin, async (req, res) => {
@@ -417,12 +457,11 @@ app.post('/api/admin/discover/channels', requireAdmin, async (req, res) => {
 
   const raw = db.getDb();
 
-  // Top 5 behavior interest tags by weight
-  const tags = raw.prepare(`
-    SELECT tag FROM profile_interests
-    WHERE profile_id = ? AND source = 'behavior' AND weight > 0
-    ORDER BY weight DESC LIMIT 5
-  `).all(profileId).map(r => r.tag);
+  // Top 5 behavior interest tags by effective weight (applies ceiling/multiplier/cap)
+  const tags = db.getEffectiveInterests(profileId)
+    .filter(r => r.source === 'behavior' && r.effective_weight > 0)
+    .slice(0, 5)
+    .map(r => r.tag);
 
   // Top 5 whitelisted channel names as search queries
   const channelNames = raw.prepare(`
