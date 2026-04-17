@@ -763,6 +763,16 @@ function getEffectiveInterests(profileId) {
     ORDER BY weight DESC
   `).all(profileId);
 
+  // Compute scaled weights for behavior tags first so we can normalize
+  const behaviorScaled = [];
+  for (const row of rows) {
+    if (row.source !== 'behavior') continue;
+    const s = settings[row.tag];
+    const multiplier = s?.multiplier ?? 1.0;
+    behaviorScaled.push({ tag: row.tag, scaled: row.weight * multiplier });
+  }
+  const maxScaled = behaviorScaled.reduce((m, r) => Math.max(m, r.scaled), 0);
+
   return rows.map(row => {
     if (row.source !== 'behavior') {
       // Parent-set interests pass through unchanged
@@ -772,8 +782,11 @@ function getEffectiveInterests(profileId) {
     const multiplier = s?.multiplier ?? 1.0;
     const hardCap    = s?.hard_cap ?? null;
     const scaled     = row.weight * multiplier;
-    const capBound   = hardCap !== null ? Math.min(hardCap, ceiling) : ceiling;
-    return { ...row, effective_weight: Math.min(scaled, capBound) };
+    // Normalize so the top behavior tag always sits at the ceiling,
+    // preserving relative ranking regardless of absolute accumulation.
+    const normalized = maxScaled > 0 ? (scaled / maxScaled) * ceiling : 0;
+    const effective  = hardCap !== null ? Math.min(normalized, hardCap) : normalized;
+    return { ...row, effective_weight: effective };
   }).sort((a, b) => b.effective_weight - a.effective_weight);
 }
 
