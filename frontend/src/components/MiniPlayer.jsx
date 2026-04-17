@@ -255,7 +255,7 @@ export default function MiniPlayer() {
     if (countdown === 0) {
       clearTimeout(countdownRef.current);
       setCountdown(null);
-      if (nextVideo) { openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`); }
+      if (nextVideo) { openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`, { replace: true }); }
       return;
     }
     countdownRef.current = setTimeout(() => setCountdown(c => c - 1), 1000);
@@ -415,6 +415,7 @@ export default function MiniPlayer() {
         allowFullScreen
         tabIndex={-1}
         title="Video player"
+        style={minimized ? { pointerEvents: 'none' } : undefined}
       />
 
       {/* ── Full-mode custom controls ── */}
@@ -494,7 +495,7 @@ export default function MiniPlayer() {
             </button>
             {/* Next video */}
             <button
-              onClick={nextVideo ? () => { cancelCountdown(); openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`); } : undefined}
+              onClick={nextVideo ? () => { cancelCountdown(); openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`, { replace: true }); } : undefined}
               className={`text-white transition-opacity ${nextVideo ? '' : 'opacity-30'} ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`}
               aria-label="Next video"
             >
@@ -636,7 +637,7 @@ export default function MiniPlayer() {
                   {filtered.map(video => (
                     <button
                       key={video.video_id}
-                      onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`); setShowDrawer(false); }}
+                      onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`, { replace: true }); setShowDrawer(false); }}
                       className={`flex-shrink-0 text-left ${landscape ? 'w-[19rem]' : 'w-36'}`}
                     >
                       <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white/10">
@@ -689,7 +690,7 @@ export default function MiniPlayer() {
               Cancel
             </button>
             <button
-              onClick={() => { cancelCountdown(); openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`); }}
+              onClick={() => { cancelCountdown(); openVideo(nextVideo.video_id); navigate(`/watch/${nextVideo.video_id}`, { replace: true }); }}
               className="px-5 py-2 rounded-full bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors"
             >
               Play Now
@@ -712,21 +713,21 @@ export default function MiniPlayer() {
       {minimized && (
         <>
           <div className="absolute inset-0 z-[5]" onClick={handleExpand} />
-          <div className="absolute top-0 right-0 bottom-0 z-10 flex items-center gap-0.5 pr-1">
+          <div className="absolute top-0 right-0 bottom-0 z-10 flex flex-col">
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 const cmd = playing ? 'pauseVideo' : 'playVideo';
                 postCmd(cmd, '');
               }}
-              className="p-1.5" aria-label={playing ? 'Pause' : 'Play'}
+              className="flex-1 flex items-center justify-center px-3" aria-label={playing ? 'Pause' : 'Play'}
             >
               {playing
                 ? <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                 : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M8 5v14l11-7z"/></svg>
               }
             </button>
-            <button onClick={handleClose} className="p-1.5" aria-label="Close">
+            <button onClick={handleClose} className="flex-1 flex items-center justify-center px-3" aria-label="Close">
               <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             </button>
           </div>

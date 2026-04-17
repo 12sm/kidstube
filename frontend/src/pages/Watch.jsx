@@ -172,7 +172,7 @@ export default function Watch() {
                   {related.map(video => (
                     <button
                       key={video.video_id}
-                      onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`); }}
+                      onClick={() => { openVideo(video.video_id); navigate(`/watch/${video.video_id}`, { replace: true }); }}
                       className="flex-shrink-0 w-36 text-left group"
                     >
                       <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-yt-card">
@@ -326,7 +326,7 @@ export default function Watch() {
                 .filter(v => relatedFilter === 'all' || v.channel_id === relatedFilter)
                 .slice(0, 8)
                 .map(video => (
-                  <VideoCard key={video.video_id} video={video} disablePreview />
+                  <VideoCard key={video.video_id} video={video} disablePreview replaceNav />
                 ))
               }
             </div>
@@ -341,7 +341,7 @@ export default function Watch() {
             <h2 className="text-yt-muted text-xs font-semibold uppercase tracking-wider mb-3">Up Next</h2>
             <div className="space-y-4">
               {related.map(video => (
-                <VideoCard key={video.video_id} video={video} stacked />
+                <VideoCard key={video.video_id} video={video} stacked replaceNav />
               ))}
             </div>
           </div>

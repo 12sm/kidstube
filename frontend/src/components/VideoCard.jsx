@@ -97,11 +97,11 @@ function CardMenu({ video, onClose, onRemoved }) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function VideoCard({ video, compact = false, stacked = false, disablePreview = false, watchProgress = null, onRemoved }) {
+export default function VideoCard({ video, compact = false, stacked = false, disablePreview = false, watchProgress = null, onRemoved, replaceNav = false }) {
   const navigate = useNavigate();
   const cardRef  = useRef(null);
 
-  const goWatch = (videoId) => navigate(`/watch/${videoId}`);
+  const goWatch = (videoId) => navigate(`/watch/${videoId}`, { replace: replaceNav });
   const timerRef  = useRef(null);
   const [previewing, setPreviewing] = useState(false);
   const [menuOpen,   setMenuOpen]   = useState(false);
