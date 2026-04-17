@@ -91,4 +91,34 @@ function isShort(video) {
   return false;
 }
 
-module.exports = { runFilterPass, applyKeywordFilter, applyChannelFilter, isShort };
+/**
+ * Pass 0: Live stream detection
+ *
+ * Primary: yt-dlp is_live / was_live / live_status flags (most reliable).
+ * Fallback: title-pattern heuristics for the RSS-only stage before yt-dlp runs.
+ *   Only fires when yt-dlp hasn't run yet (live_status and is_live are both absent).
+ *   Patterns are deliberately conservative — they require clear broadcast signals
+ *   (🔴 + "live", "livestream", title starts/ends with "live", "LIVE!!!") so that
+ *   videos where "live" appears as a verb ("secretly live in a park") are not caught.
+ */
+function isLive(video) {
+  // Primary: yt-dlp metadata flags
+  if (video.is_live === true) return true;
+  if (video.was_live === true) return true;
+  const s = video.live_status;
+  if (s === 'is_live' || s === 'was_live' || s === 'post_live') return true;
+
+  // Fallback title patterns — only when yt-dlp hasn't provided flags yet
+  if (video.live_status === undefined && video.is_live === undefined) {
+    const title = (video.title || '').toLowerCase();
+    if (/livestream|live\s+stream/.test(title)) return true;         // "livestream" or "live stream"
+    if (/🔴/.test(video.title || '') && /\blive\b/.test(title)) return true; // 🔴 + word "live"
+    if (/^live\s*[|:]/.test(title)) return true;                     // title starts "live |" or "live:"
+    if (/[|:]\s*live\s*$/.test(title)) return true;                  // title ends "| live" or ": live"
+    if (/\blive\s*!{2,}/.test(title)) return true;                   // "LIVE!!!"
+  }
+
+  return false;
+}
+
+module.exports = { runFilterPass, applyKeywordFilter, applyChannelFilter, isShort, isLive };

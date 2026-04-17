@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-180.png', 'icon-192.png', 'icon-512.png', 'icon.svg', 'offline.html'],
+      includeAssets: ['icon-180-v4.png', 'icon-192.png', 'icon-512.png', 'icon.svg', 'offline.html'],
       manifest: {
         name: 'YouTube',
         short_name: 'YouTube',

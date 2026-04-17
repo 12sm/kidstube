@@ -259,8 +259,49 @@ async function discoverChannels(query) {
   }
 }
 
+// Fetch videos liked by a profile since a given date.
+// Note: YouTube API blocks watch history (HL playlist) for third-party apps.
+// Liked videos (LL playlist) are accessible and serve as a stronger discovery signal —
+// a deliberate thumbs-up is a cleaner intent signal than a passive view.
+async function getRecentLikes(profileId, since) {
+  const oauth2Client = await auth.getAuthenticatedClient(profileId);
+  const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+
+  const items = [];
+  let pageToken;
+
+  do {
+    const res = await youtube.playlistItems.list({
+      part: 'snippet',
+      playlistId: 'LL',
+      maxResults: 50,
+      pageToken
+    });
+
+    let hitOld = false;
+    for (const item of res.data.items || []) {
+      const likedAt = new Date(item.snippet.publishedAt);
+      if (likedAt < since) { hitOld = true; break; }
+      const videoId = item.snippet.resourceId?.videoId;
+      if (!videoId) continue;
+      items.push({
+        video_id:     videoId,
+        channel_id:   item.snippet.videoOwnerChannelId || null,
+        channel_name: item.snippet.videoOwnerChannelTitle || null,
+        liked_at:     item.snippet.publishedAt
+      });
+    }
+
+    if (hitOld) break;
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+
+  return items;
+}
+
 module.exports = {
   getSubscriptions,
+  getRecentLikes,
   getVideoMetadata,
   getChannelRecentVideos,
   enrichChannels,

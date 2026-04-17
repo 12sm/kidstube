@@ -168,7 +168,23 @@ app.get('/api/feed/:profileId', (req, res) => {
   const page = parseInt(req.query.page) || 0;
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
 
-  const videos = db.getApprovedFeed(profileId, page, limit);
+  // Fetch a larger pool so the channel-diversity filter has enough to work with.
+  // ORDER BY is random each call so page offset isn't meaningful — each call
+  // returns a fresh random slice, which is fine for infinite-scroll on a 5k+ library.
+  const raw = db.getApprovedFeed(profileId, 0, limit * 5);
+
+  // Cap at 2 videos per channel per page so no single channel dominates
+  const channelCount = new Map();
+  const videos = [];
+  for (const v of raw) {
+    const n = channelCount.get(v.channel_id) || 0;
+    if (n < 2) {
+      videos.push(v);
+      channelCount.set(v.channel_id, n + 1);
+    }
+    if (videos.length >= limit) break;
+  }
+
   res.json({ videos, page, limit });
 });
 
@@ -382,6 +398,13 @@ app.delete('/api/search/history/:profileId/:query', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/search/suggestions', (req, res) => {
+  const q         = (req.query.q || '').trim();
+  const profileId = parseInt(req.query.profile_id);
+  if (!q || !profileId) return res.json({ suggestions: [] });
+  res.json({ suggestions: db.getSearchSuggestions(profileId, q) });
+});
+
 // ── Channel Discovery ────────────────────────────────────────────────────────
 
 app.post('/api/admin/discover/channels', requireAdmin, async (req, res) => {
@@ -477,12 +500,14 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/library', requireAdmin, (req, res) => {
-  const status    = ['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'all';
-  const page      = Math.max(0, parseInt(req.query.page)  || 0);
-  const limit     = Math.min(50, Math.max(1, parseInt(req.query.limit) || 25));
-  const search    = (req.query.search || '').trim();
-  const profileId = req.query.profile_id ? parseInt(req.query.profile_id, 10) : null;
-  res.json(db.getVideoLibrary({ status, page, limit, search, profileId }));
+  const status          = ['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'all';
+  const page            = Math.max(0, parseInt(req.query.page)  || 0);
+  const limit           = Math.min(50, Math.max(1, parseInt(req.query.limit) || 25));
+  const search          = (req.query.search || '').trim();
+  const profileId       = req.query.profile_id ? parseInt(req.query.profile_id, 10) : null;
+  const rejectionFilter = ['all','shorts','live','keyword','llm','manual'].includes(req.query.rejection_filter)
+    ? req.query.rejection_filter : 'all';
+  res.json(db.getVideoLibrary({ status, page, limit, search, profileId, rejectionFilter }));
 });
 
 app.get('/api/admin/filter-log', requireAdmin, (req, res) => {
@@ -635,7 +660,7 @@ app.post('/api/admin/channels/add', requireAdmin, async (req, res) => {
     const channel = await youtube.resolveChannelByUrl(url.trim());
     const profiles = profileId ? [{ id: parseInt(profileId) }] : db.getProfiles();
     for (const profile of profiles) {
-      db.upsertChannel({ ...channel, profile_id: profile.id, whitelisted: 0 });
+      db.upsertChannel({ ...channel, profile_id: profile.id, whitelisted: 1 });
     }
     res.json({ ok: true, channel });
   } catch (err) {

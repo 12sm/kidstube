@@ -5,7 +5,8 @@ FROM node:20-alpine
 # make, g++: required for building better-sqlite3 native bindings
 # ffmpeg: required by yt-dlp for media processing
 # curl: used for yt-dlp binary download and healthchecks
-RUN apk add --no-cache python3 make g++ ffmpeg curl
+RUN apk add --no-cache python3 make g++ ffmpeg curl \
+    chromium nss freetype harfbuzz ca-certificates ttf-freefont
 
 # Install yt-dlp binary
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
@@ -17,6 +18,8 @@ WORKDIR /app
 # Copy package files and install dependencies
 # Done before copying source so layer is cached unless deps change
 COPY package*.json ./
+# Skip Playwright browser download — we use system Chromium installed via apk
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm install --omit=dev
 
 # Copy application source

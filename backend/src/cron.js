@@ -7,6 +7,7 @@ const filter = require('./filter');
 const { runLlmCheck } = require('./llm');
 const { parseTopicCategories } = require('./youtube');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
+const { scrapeWatchHistory } = require('./history-scraper');
 
 let isRunning = false;
 
@@ -35,6 +36,13 @@ async function runNightlyJob() {
         await syncSubscriptions(profile);
       } catch (err) {
         console.error(`[Cron] Subscription sync failed for ${profile.name}:`, err.message);
+      }
+
+      // Step 1b: Discover new channels/videos from yesterday's watch history
+      try {
+        await discoverFromHistory(profile, stats, llmState);
+      } catch (err) {
+        console.error(`[Cron] History discovery failed for ${profile.name}:`, err.message);
       }
 
       // Step 2: Get whitelisted channels
@@ -66,12 +74,12 @@ async function runNightlyJob() {
         ? rawDb.prepare(`SELECT channel_id FROM videos WHERE channel_id IN (${ph}) GROUP BY channel_id`).all(...channelIds)
         : [];
       const hasVideos = new Set(existingRows.map(r => r.channel_id));
-      const newChannels = channels.filter(c => !hasVideos.has(c.channel_id)).slice(0, 30);
+      const newChannels = channels.filter(c => !hasVideos.has(c.channel_id)).slice(0, 100);
       if (newChannels.length > 0) {
         console.log(`[Cron] Backfilling ${newChannels.length} brand-new channels via YouTube API`);
         for (const channel of newChannels) {
           try {
-            const bStats = await backfillChannel(channel, profile.id);
+            const bStats = await backfillChannel(channel, profile.id, llmState);
             if (bStats.approved > 0) {
               console.log(`[Cron] Backfill: ${bStats.approved} new videos from ${channel.channel_name}`);
             }
@@ -282,9 +290,11 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
   stats.approved++;
 }
 
-async function backfillChannel(channel, profileId) {
+async function backfillChannel(channel, profileId, llmState) {
   const filterRules = db.getFilterRules(profileId);
-  const llmState    = { calls: 0, cap: 50 };
+  // llmState is shared with the nightly job so backfill + RSS together respect one cap.
+  // Fall back to a standalone cap if called outside the nightly job (e.g. manual trigger).
+  const sharedLlmState = llmState || { calls: 0, cap: 50 };
   const stats       = { found: 0, approved: 0, rejected: 0, error: null };
   try {
     const apiVideos = await youtube.getChannelRecentVideos(channel.channel_id, 50);
@@ -292,7 +302,7 @@ async function backfillChannel(channel, profileId) {
       if (db.videoExists(v.video_id)) continue;
       v._profileId        = profileId;
       v.channel_thumbnail = channel.thumbnail_url || null;
-      await processVideo(v, filterRules, stats, false, null, llmState);
+      await processVideo(v, filterRules, stats, false, null, sharedLlmState);
     }
     console.log(`[Backfill] ${channel.channel_name}: approved=${stats.approved} rejected=${stats.rejected}`);
   } catch (err) {
@@ -327,6 +337,60 @@ async function syncSubscriptions(profile) {
       thumbnail_url: sub.thumbnail_url,
       whitelisted: 0
     });
+  }
+}
+
+async function discoverFromHistory(profile, stats, llmState) {
+  // Scrape the last ~100 watched video IDs from the YouTube history page.
+  // This uses a saved Playwright browser session (see backend/scripts/setup-session.js).
+  // If no session file exists for this profile the step is silently skipped.
+  let videoIds;
+  try {
+    videoIds = await scrapeWatchHistory(profile.id, 100);
+  } catch (err) {
+    console.warn(`[Cron] History scrape failed for ${profile.name}: ${err.message}`);
+    return;
+  }
+
+  if (!videoIds.length) return;
+
+  // Filter to IDs not yet in the database
+  const newVideoIds = videoIds.filter(id => !db.videoExists(id));
+  if (!newVideoIds.length) {
+    console.log(`[Cron] No new history videos for ${profile.name} (all already known)`);
+    return;
+  }
+
+  console.log(`[Cron] ${newVideoIds.length} new video(s) from history for ${profile.name}`);
+
+  // Fetch full metadata so we have channel info, duration, tags, etc.
+  const metadataList = await youtube.getVideoMetadata(newVideoIds);
+
+  // Auto-whitelist channels the kid is already watching on real YouTube.
+  // Individual videos still go through the full filter pipeline.
+  const existingChannelIds = new Set(
+    db.getChannelsForProfile(profile.id).map(c => c.channel_id)
+  );
+  for (const meta of metadataList) {
+    if (meta.channel_id && !existingChannelIds.has(meta.channel_id)) {
+      db.upsertChannel({
+        channel_id:   meta.channel_id,
+        profile_id:   profile.id,
+        channel_name: meta.channel_name || null,
+        thumbnail_url: null,
+        whitelisted:  1,
+      });
+      existingChannelIds.add(meta.channel_id);
+      console.log(`[Cron] Auto-whitelisted channel from history: "${meta.channel_name}" for ${profile.name}`);
+    }
+  }
+
+  const filterRules = db.getFilterRules(profile.id);
+  for (const meta of metadataList) {
+    if (db.videoExists(meta.video_id)) continue;
+    meta._profileId = profile.id;
+    await processVideo(meta, filterRules, stats, false, null, llmState);
+    await new Promise(r => setTimeout(r, 200));
   }
 }
 

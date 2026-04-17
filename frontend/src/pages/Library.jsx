@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ProfileContext } from '../App.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
-const AVATAR_COLORS = ['#e05252', '#4e9de0', '#50c878', '#e0a035', '#9b59b6', '#e07c4e'];
+const PROFILE_COLORS = { 5: '#2eaa5c', 6: '#d4620e' };
+const AVATAR_COLORS  = ['#e05252', '#4e9de0', '#50c878', '#e0a035', '#9b59b6', '#e07c4e'];
 
 function formatDuration(secs) {
   if (!secs) return null;
@@ -115,7 +116,7 @@ export default function Library() {
 
   if (!profileId) return null;
 
-  const avatarColor   = AVATAR_COLORS[(parseInt(profileId) - 1) % AVATAR_COLORS.length];
+  const avatarColor   = PROFILE_COLORS[parseInt(profileId)] ?? AVATAR_COLORS[(parseInt(profileId) - 1) % AVATAR_COLORS.length];
   const avatarInitial = profileName?.charAt(0)?.toUpperCase() || '?';
 
   // Videos with meaningful progress (> 5%) and not finished (< 95%)
