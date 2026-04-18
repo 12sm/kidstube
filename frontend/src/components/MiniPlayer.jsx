@@ -304,7 +304,7 @@ export default function MiniPlayer() {
 
   const landscapeStyle = {
     position: 'fixed', top: 0, left: 0,
-    width: dims.w, height: dims.h,
+    width: '100vw', height: '100vh',
     zIndex: 50, borderRadius: 0, background: '#000',
     transition: 'none',
   };
