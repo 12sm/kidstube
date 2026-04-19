@@ -85,11 +85,11 @@ export default function Home() {
     if (loading || !hasMore || !profileId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/feed/${profileId}?page=${page}&limit=20`);
+      const res = await fetch(`/api/feed/${profileId}?page=${page}&limit=18`);
       const data = await res.json();
       const newVideos = shuffle(data.videos || []);
       setVideos(prev => [...prev, ...newVideos]);
-      setHasMore(newVideos.length === 20);
+      setHasMore(newVideos.length === 18);
       setPage(prev => prev + 1);
     } catch {
       setHasMore(false);
@@ -135,10 +135,10 @@ export default function Home() {
     haptic('medium');
     setVideos([]); setPage(0); setHasMore(true); setInitialLoad(true);
     try {
-      const res = await fetch(`/api/feed/${profileId}?page=0&limit=20`);
+      const res = await fetch(`/api/feed/${profileId}?page=0&limit=18`);
       const data = await res.json();
       const newVideos = shuffle(data.videos || []);
-      setVideos(newVideos); setHasMore(newVideos.length === 20); setPage(1);
+      setVideos(newVideos); setHasMore(newVideos.length === 18); setPage(1);
     } catch { /* ignore */ }
     setInitialLoad(false);
     setRefreshing(false);
@@ -263,6 +263,13 @@ export default function Home() {
               onRemoved={(videoId) => setVideos(prev => prev.filter(v => v.video_id !== videoId))}
             />
           ))}
+          {/* Pad the last row so appending new batches never shifts existing items */}
+          {!initialLoad && displayVideos.length % 3 !== 0 && Array.from({ length: 3 - (displayVideos.length % 3) }).map((_, i) => (
+            <div key={`spacer-${i}`} className="hidden lg:block" aria-hidden="true" />
+          ))}
+          {!initialLoad && displayVideos.length % 2 !== 0 && (
+            <div key="spacer-md" className="hidden md:block lg:hidden" aria-hidden="true" />
+          )}
         </div>
 
         <div ref={loaderRef} className="py-6 text-center text-yt-muted text-sm">
