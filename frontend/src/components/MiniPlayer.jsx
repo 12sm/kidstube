@@ -191,8 +191,17 @@ export default function MiniPlayer() {
       setDims({ w: window.innerWidth, h: window.innerHeight });
       setLandscape(window.innerWidth > window.innerHeight);
     };
+    // Re-read dims when the app comes back to foreground — iOS/iPadOS reports
+    // stale dimensions after app-switching, causing the video pane to shrink.
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') setTimeout(onResize, 100);
+    };
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // Focus the gesture layer whenever we enter full-mode on the Watch page so that
@@ -709,28 +718,30 @@ export default function MiniPlayer() {
         </div>
       )}
 
-      {/* ── Mini-mode: tap to expand, play/pause + close ── */}
+      {/* ── Mini-mode: tap body to expand, play top-left, close top-right ── */}
       {minimized && (
         <>
+          {/* Full tap blocker — anywhere on the thumbnail expands back to main player */}
           <div className="absolute inset-0 z-[5]" onClick={handleExpand} />
-          <div className="absolute top-0 right-0 bottom-0 z-10 flex flex-col">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                const cmd = playing ? 'pauseVideo' : 'playVideo';
-                postCmd(cmd, '');
-              }}
-              className="flex-1 flex items-center justify-center px-3" aria-label={playing ? 'Pause' : 'Play'}
-            >
-              {playing
-                ? <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M8 5v14l11-7z"/></svg>
-              }
-            </button>
-            <button onClick={handleClose} className="flex-1 flex items-center justify-center px-3" aria-label="Close">
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-            </button>
-          </div>
+          {/* Play/pause — top left */}
+          <button
+            onClick={(e) => { e.stopPropagation(); postCmd(playing ? 'pauseVideo' : 'playVideo', ''); }}
+            className="absolute top-1 left-1 z-10 p-1 bg-black/60 rounded-full"
+            aria-label={playing ? 'Pause' : 'Play'}
+          >
+            {playing
+              ? <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              : <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M8 5v14l11-7z"/></svg>
+            }
+          </button>
+          {/* Close — top right */}
+          <button
+            onClick={handleClose}
+            className="absolute top-1 right-1 z-10 p-1 bg-black/60 rounded-full"
+            aria-label="Close"
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
         </>
       )}
     </div>
