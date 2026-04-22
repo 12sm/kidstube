@@ -193,8 +193,12 @@ export default function MiniPlayer() {
     };
     // Re-read dims when the app comes back to foreground — iOS/iPadOS reports
     // stale dimensions after app-switching, causing the video pane to shrink.
+    // Also re-focus the gesture layer so spacebar still works after app-switch.
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') setTimeout(onResize, 100);
+      if (document.visibilityState === 'visible') setTimeout(() => {
+        onResize();
+        gestureLayerRef.current?.focus({ preventScroll: true });
+      }, 200);
     };
     window.addEventListener('resize', onResize);
     document.addEventListener('visibilitychange', onVisibility);
