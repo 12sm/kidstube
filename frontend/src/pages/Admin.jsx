@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate, Link } from 'react-router-dom';
+import Insights from './Insights';
 
 // Simple admin auth — JWT stored in cookie by backend, checked here
 function useAdminAuth() {
@@ -2093,6 +2094,7 @@ export default function Admin() {
     { path: '/admin/profiles', label: 'Profiles' },
     { path: '/admin/channels', label: 'Channels' },
     { path: '/admin/library', label: 'Library' },
+    { path: '/admin/insights', label: 'Insights' },
     { path: '/admin/rules', label: 'Filter Rules' },
     { path: '/admin/log', label: 'Filter Log' }
   ];
@@ -2119,6 +2121,7 @@ export default function Admin() {
         <Route path="profiles" element={<ProfileSetup />} />
         <Route path="channels" element={<ChannelManager />} />
         <Route path="library" element={<VideoLibrary />} />
+        <Route path="insights" element={<Insights />} />
         <Route path="rules" element={<FilterRules />} />
         <Route path="log" element={<FilterLog />} />
       </Routes>

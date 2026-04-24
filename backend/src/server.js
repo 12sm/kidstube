@@ -449,6 +449,22 @@ app.post('/api/admin/behavior-ceiling/:profileId', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Insights & Feed Preview ──────────────────────────────────────────────────
+
+app.get('/api/admin/insights/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const days = parseInt(req.query.days) || 30;
+  const analytics = db.getInsightsAnalytics(profileId, days);
+  res.json(analytics);
+});
+
+app.post('/api/admin/feed-preview/:profileId', requireAdmin, (req, res) => {
+  const profileId = parseInt(req.params.profileId);
+  const { overrides = {}, ceiling } = req.body;
+  const videos = db.getFeedPreview(profileId, overrides, ceiling ?? null);
+  res.json({ videos });
+});
+
 // ── Channel Discovery ────────────────────────────────────────────────────────
 
 app.post('/api/admin/discover/channels', requireAdmin, async (req, res) => {

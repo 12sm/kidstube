@@ -40,8 +40,22 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
     `SELECT tag FROM interest_tag_settings WHERE profile_id = ? AND multiplier < 1.0`
   ).all(profileId).map(r => r.tag);
 
+  // Tags with multiplier = 0 → hard exclude any video carrying these tags
+  const zeroedTags = rawDb.prepare(
+    `SELECT tag FROM interest_tag_settings WHERE profile_id = ? AND multiplier = 0`
+  ).all(profileId).map(r => r.tag);
+
   const POOL           = limit * 3;
   const DIVERSITY_TARGET = cappedTags.length > 0 ? Math.round(limit / 3) : 0; // ~5 of 15 slots
+
+  // Base exclusion clause: always exclude videos with zeroed tags
+  let baseWhere = '';
+  const baseParams = [];
+  if (zeroedTags.length > 0) {
+    const zPlaceholders = zeroedTags.map(() => '?').join(',');
+    baseWhere = `AND v.video_id NOT IN (SELECT video_id FROM video_tags WHERE tag IN (${zPlaceholders}))`;
+    baseParams.push(...zeroedTags);
+  }
 
   // ── Shared scored query builder ───────────────────────────────────────────
   // Returns the SQL + params for the main interest-scored query.
@@ -74,6 +88,9 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
           LEFT JOIN watch_comp wc ON v.video_id = wc.video_id
           WHERE v.status = 'approved'
             AND v.video_id != ?
+            AND v.channel_id IN (
+              SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1
+            )
             AND v.video_id NOT IN (
               SELECT value FROM filter_rules
               WHERE rule_type = 'video_block'
@@ -88,7 +105,7 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
             * (ABS(RANDOM()) / 9223372036854775807.0) DESC
           LIMIT ?
         `,
-        params: [videoId, profileId, videoId, profileId, ...extraParams, channelId],
+        params: [videoId, profileId, videoId, profileId, profileId, ...extraParams, channelId],
       };
     }
 
@@ -152,6 +169,9 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
         LEFT JOIN watch_comp ON v.video_id = watch_comp.video_id
         WHERE v.status = 'approved'
           AND v.video_id != ?
+          AND v.channel_id IN (
+            SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1
+          )
           AND v.video_id NOT IN (
             SELECT value FROM filter_rules
             WHERE rule_type = 'video_block'
@@ -161,22 +181,22 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
         ORDER BY score DESC
         LIMIT ?
       `,
-      params: [profileId, videoId, profileId, channelId, videoId, profileId, ...extraParams],
+      params: [profileId, videoId, profileId, channelId, videoId, profileId, profileId, ...extraParams],
     };
   };
 
   // ── Main pool ─────────────────────────────────────────────────────────────
-  const main = buildScoredQuery();
+  const main = buildScoredQuery(baseWhere, baseParams);
   const mainPool = rawDb.prepare(main.sql).all(...main.params, POOL);
 
   // ── Diversity pool (non-dominant-tag videos) ──────────────────────────────
   let diversityPool = [];
   if (DIVERSITY_TARGET > 0) {
     const placeholders = cappedTags.map(() => '?').join(',');
-    const excludeClause = `AND v.video_id NOT IN (
+    const excludeClause = `${baseWhere} AND v.video_id NOT IN (
       SELECT video_id FROM video_tags WHERE tag IN (${placeholders})
     )`;
-    const div = buildScoredQuery(excludeClause, cappedTags);
+    const div = buildScoredQuery(excludeClause, [...baseParams, ...cappedTags]);
     diversityPool = rawDb.prepare(div.sql).all(...div.params, POOL);
   }
 

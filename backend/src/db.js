@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { normalizeTag, normalizeTags, CANONICAL_TAGS, ALIAS_MAP } = require('./tags');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'kidstube.db');
 
@@ -268,6 +269,71 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_tag_settings_profile ON interest_tag_settings(profile_id);
   `);
 
+  // Migrate: normalize existing tags (one-time)
+  db.exec(`CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, ran_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  const hasTagNorm = db.prepare("SELECT 1 FROM migrations WHERE key = 'tag_normalization_v1'").get();
+  if (!hasTagNorm) {
+    const aliasEntries = Object.entries(ALIAS_MAP);
+    console.log(`Tag normalization: migrating ${aliasEntries.length} aliases...`);
+
+    db.transaction(() => {
+      // 1. video_tags: delete alias rows where canonical already exists for same video, rename the rest
+      const deleteVtDupe = db.prepare(
+        `DELETE FROM video_tags WHERE tag = ? AND video_id IN (SELECT video_id FROM video_tags WHERE tag = ?)`
+      );
+      const renameVt = db.prepare(`UPDATE video_tags SET tag = ? WHERE tag = ?`);
+
+      // 2. profile_interests: merge alias weight into existing canonical row, then delete alias row.
+      //    If no canonical row exists, just rename the alias row.
+      const findPiAlias = db.prepare(
+        `SELECT id, profile_id, weight, source, last_seen FROM profile_interests WHERE tag = ?`
+      );
+      const findPiCanonical = db.prepare(
+        `SELECT id FROM profile_interests WHERE profile_id = ? AND tag = ? AND source = ?`
+      );
+      const addWeightPi = db.prepare(
+        `UPDATE profile_interests SET weight = weight + ?, last_seen = MAX(last_seen, ?) WHERE id = ?`
+      );
+      const deletePiById = db.prepare(`DELETE FROM profile_interests WHERE id = ?`);
+      const renamePiById = db.prepare(`UPDATE profile_interests SET tag = ? WHERE id = ?`);
+
+      // 3. interest_tag_settings: delete alias rows where canonical exists for same profile, rename rest
+      const deleteTsDupe = db.prepare(
+        `DELETE FROM interest_tag_settings WHERE tag = ? AND profile_id IN (SELECT profile_id FROM interest_tag_settings WHERE tag = ?)`
+      );
+      const renameTs = db.prepare(`UPDATE interest_tag_settings SET tag = ? WHERE tag = ?`);
+
+      for (const [alias, canonical] of aliasEntries) {
+        // video_tags
+        deleteVtDupe.run(alias, canonical);
+        renameVt.run(canonical, alias);
+
+        // profile_interests: per-row merge
+        const aliasRows = findPiAlias.all(alias);
+        for (const row of aliasRows) {
+          const existing = findPiCanonical.get(row.profile_id, canonical, row.source);
+          if (existing) {
+            addWeightPi.run(row.weight, row.last_seen, existing.id);
+            deletePiById.run(row.id);
+          } else {
+            renamePiById.run(canonical, row.id);
+          }
+        }
+
+        // interest_tag_settings
+        deleteTsDupe.run(alias, canonical);
+        renameTs.run(canonical, alias);
+      }
+
+      db.prepare("INSERT INTO migrations (key) VALUES ('tag_normalization_v1')").run();
+    })();
+
+    // Count remaining unique tags
+    const tagCount = db.prepare('SELECT COUNT(DISTINCT tag) as cnt FROM video_tags').get();
+    const interestCount = db.prepare('SELECT COUNT(DISTINCT tag) as cnt FROM profile_interests').get();
+    console.log(`Tag normalization complete: ${tagCount.cnt} unique video tags, ${interestCount.cnt} unique interest tags`);
+  }
+
   console.log('Database migrated successfully');
 }
 
@@ -371,7 +437,6 @@ function updateVideoStatus(videoId, status, rejectionReason = null) {
 }
 
 function getApprovedFeed(profileId, page = 0, limit = 20) {
-  // Get all whitelisted channel IDs for this profile
   const channels = getWhitelistedChannels(profileId);
   if (channels.length === 0) return [];
 
@@ -380,18 +445,61 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
   const offset = page * limit;
 
   return getDb().prepare(`
-    SELECT v.*, c.thumbnail_url as channel_thumbnail_img
-    FROM videos v
-    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c ON v.channel_id = c.channel_id
-    LEFT JOIN (
+    WITH effective_interests AS (
+      SELECT pi.tag,
+        pi.weight * COALESCE(its.multiplier, 1.0)              AS scaled,
+        COALESCE(its.hard_cap, NULL)                            AS hard_cap,
+        p.behavior_weight_ceiling                               AS ceiling,
+        MAX(pi.weight * COALESCE(its.multiplier, 1.0)) OVER () AS max_scaled
+      FROM profile_interests pi
+      JOIN profiles p ON p.id = pi.profile_id
+      LEFT JOIN interest_tag_settings its
+        ON its.profile_id = pi.profile_id AND its.tag = pi.tag
+      WHERE pi.profile_id = ? AND pi.source = 'behavior'
+    ),
+    eff_weights AS (
+      SELECT tag,
+        CASE WHEN max_scaled > 0
+          THEN MIN((scaled / max_scaled) * ceiling,
+                   COALESCE(hard_cap, ceiling))
+          ELSE 0 END AS effective_weight
+      FROM effective_interests
+    ),
+    zeroed_tags AS (
+      SELECT tag FROM interest_tag_settings WHERE profile_id = ? AND multiplier = 0
+    ),
+    penalized_tags AS (
+      SELECT tag, multiplier FROM interest_tag_settings WHERE profile_id = ? AND multiplier > 0 AND multiplier < 1.0
+    ),
+    int_scores AS (
+      SELECT vt.video_id, MIN(SUM(ew.effective_weight), 4.0) AS interest_score
+      FROM video_tags vt
+      JOIN eff_weights ew ON vt.tag = ew.tag
+      GROUP BY vt.video_id
+    ),
+    penalty_scores AS (
+      SELECT vt.video_id,
+        EXP(SUM(LN(pt.multiplier))) AS penalty
+      FROM video_tags vt
+      JOIN penalized_tags pt ON vt.tag = pt.tag
+      GROUP BY vt.video_id
+    ),
+    watch_comp AS (
       SELECT video_id,
         SUM(CASE WHEN duration_seconds > 0
               THEN MIN(CAST(progress_seconds AS REAL) / duration_seconds, 1.0)
-              ELSE 0 END) as recent_completed
+              ELSE 0 END) AS total_completed
       FROM watch_history
       WHERE profile_id = ? AND watched_at > datetime('now', '-30 days')
       GROUP BY video_id
-    ) wh ON v.video_id = wh.video_id
+    )
+    SELECT v.*, c.thumbnail_url AS channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c
+      ON v.channel_id = c.channel_id
+    LEFT JOIN int_scores ON v.video_id = int_scores.video_id
+    LEFT JOIN penalty_scores ps ON v.video_id = ps.video_id
+    LEFT JOIN watch_comp ON v.video_id = watch_comp.video_id
     WHERE v.channel_id IN (${placeholders})
       AND v.status = 'approved'
       AND v.video_id NOT IN (
@@ -399,12 +507,18 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
         WHERE rule_type = 'video_block'
           AND (profile_id = ? OR profile_id IS NULL)
       )
+      AND v.video_id NOT IN (
+        SELECT video_id FROM video_tags WHERE tag IN (SELECT tag FROM zeroed_tags)
+      )
     ORDER BY
-      CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 2.0 ELSE 1.0 END
-      * (1.0 / (1.0 + COALESCE(wh.recent_completed, 0) * 0.5))
-      * (ABS(RANDOM()) / 9223372036854775807.0) DESC
+      (COALESCE(int_scores.interest_score, 0.5)
+        + CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 1.0 ELSE 0.0 END)
+      * COALESCE(ps.penalty, 1.0)
+      * (1.0 / (1.0 + COALESCE(watch_comp.total_completed, 0) * 0.5))
+      * (0.7 + 0.3 * (ABS(RANDOM()) / 9223372036854775807.0))
+      DESC
     LIMIT ? OFFSET ?
-  `).all([profileId, ...channelIds, profileId, limit, offset]);
+  `).all([profileId, profileId, profileId, profileId, ...channelIds, profileId, limit, offset]);
 }
 
 function blockVideo(profileId, videoId) {
@@ -650,13 +764,14 @@ function getStats() {
 // --- Video tags ---
 
 function insertVideoTags(videoId, tags) {
+  const normalized = normalizeTags(tags);
   const insert = getDb().prepare(
     `INSERT OR IGNORE INTO video_tags (video_id, tag) VALUES (?, ?)`
   );
   const insertMany = getDb().transaction((tags) => {
     for (const tag of tags) insert.run(videoId, tag);
   });
-  insertMany(tags);
+  insertMany(normalized);
 }
 
 function getVideoTags(videoId) {
@@ -668,23 +783,25 @@ function getVideoTags(videoId) {
 // --- Profile interests ---
 
 function upsertProfileInterest(profileId, tag, delta, source = 'behavior') {
+  const t = normalizeTag(tag);
   getDb().prepare(`
     INSERT INTO profile_interests (profile_id, tag, weight, source, last_seen)
     VALUES (?, ?, MAX(0.0, ?), ?, CURRENT_TIMESTAMP)
     ON CONFLICT(profile_id, tag, source) DO UPDATE SET
       weight    = MAX(0.0, weight + ?),
       last_seen = CURRENT_TIMESTAMP
-  `).run(profileId, tag, Math.max(0, delta), source, delta);
+  `).run(profileId, t, Math.max(0, delta), source, delta);
 }
 
 function setParentInterest(profileId, tag, weight) {
+  const t = normalizeTag(tag);
   getDb().prepare(`
     INSERT INTO profile_interests (profile_id, tag, weight, source, last_seen)
     VALUES (?, ?, ?, 'parent', CURRENT_TIMESTAMP)
     ON CONFLICT(profile_id, tag, source) DO UPDATE SET
       weight    = ?,
       last_seen = CURRENT_TIMESTAMP
-  `).run(profileId, tag, weight, weight);
+  `).run(profileId, t, weight, weight);
 }
 
 function deleteParentInterests(profileId) {
@@ -1086,6 +1203,230 @@ function bulkApplyChannelRecommendations(profileId, channelIds = null) {
   return recs.length;
 }
 
+// --- Insights analytics ---
+
+function getInsightsAnalytics(profileId, days = 30) {
+  const db = getDb();
+
+  const watchTimeByDay = db.prepare(`
+    SELECT DATE(wh.watched_at) AS date,
+      ROUND(SUM(wh.progress_seconds) / 60.0, 1) AS minutes
+    FROM watch_history wh
+    WHERE wh.profile_id = ? AND wh.watched_at > datetime('now', '-' || ? || ' days')
+    GROUP BY DATE(wh.watched_at)
+    ORDER BY date
+  `).all(profileId, days);
+
+  const watchTimeByHour = db.prepare(`
+    SELECT CAST(strftime('%H', wh.watched_at) AS INTEGER) AS hour,
+      ROUND(SUM(wh.progress_seconds) / 60.0, 1) AS minutes
+    FROM watch_history wh
+    WHERE wh.profile_id = ? AND wh.watched_at > datetime('now', '-' || ? || ' days')
+    GROUP BY hour
+    ORDER BY hour
+  `).all(profileId, days);
+
+  const topTags = db.prepare(`
+    SELECT vt.tag,
+      COUNT(DISTINCT wh.video_id) AS watchCount,
+      ROUND(SUM(wh.progress_seconds) / 60.0, 1) AS totalMinutes
+    FROM watch_history wh
+    JOIN video_tags vt ON vt.video_id = wh.video_id
+    WHERE wh.profile_id = ? AND wh.watched_at > datetime('now', '-' || ? || ' days')
+    GROUP BY vt.tag
+    ORDER BY totalMinutes DESC
+    LIMIT 20
+  `).all(profileId, days);
+
+  // Trending: compare last 7 days vs prior 7 days
+  const trendingTags = db.prepare(`
+    WITH recent AS (
+      SELECT vt.tag, COUNT(DISTINCT wh.video_id) AS cnt
+      FROM watch_history wh
+      JOIN video_tags vt ON vt.video_id = wh.video_id
+      WHERE wh.profile_id = ? AND wh.watched_at > datetime('now', '-7 days')
+      GROUP BY vt.tag
+    ),
+    prior AS (
+      SELECT vt.tag, COUNT(DISTINCT wh.video_id) AS cnt
+      FROM watch_history wh
+      JOIN video_tags vt ON vt.video_id = wh.video_id
+      WHERE wh.profile_id = ?
+        AND wh.watched_at > datetime('now', '-14 days')
+        AND wh.watched_at <= datetime('now', '-7 days')
+      GROUP BY vt.tag
+    )
+    SELECT COALESCE(r.tag, p.tag) AS tag,
+      COALESCE(r.cnt, 0) AS recentCount,
+      COALESCE(p.cnt, 0) AS priorCount,
+      CASE WHEN COALESCE(p.cnt, 0) = 0 THEN COALESCE(r.cnt, 0) * 2.0
+           ELSE ROUND(CAST(COALESCE(r.cnt, 0) AS REAL) / p.cnt, 2) END AS trend
+    FROM recent r
+    FULL OUTER JOIN prior p ON r.tag = p.tag
+    WHERE COALESCE(r.cnt, 0) > 0
+    ORDER BY trend DESC
+    LIMIT 15
+  `).all(profileId, profileId);
+
+  const totals = db.prepare(`
+    SELECT
+      ROUND(SUM(progress_seconds) / 60.0, 1) AS totalWatchMinutes,
+      COUNT(DISTINCT video_id) AS totalVideosWatched
+    FROM watch_history
+    WHERE profile_id = ? AND watched_at > datetime('now', '-' || ? || ' days')
+  `).get(profileId, days);
+
+  return {
+    watchTimeByDay,
+    watchTimeByHour,
+    topTags,
+    trendingTags,
+    totalWatchMinutes: totals?.totalWatchMinutes || 0,
+    totalVideosWatched: totals?.totalVideosWatched || 0,
+  };
+}
+
+// --- Feed preview (stateless, with weight overrides) ---
+
+function getFeedPreview(profileId, overrides = {}, ceilingOverride = null) {
+  const db = getDb();
+  const channels = getWhitelistedChannels(profileId);
+  if (channels.length === 0) return [];
+
+  const channelIds = channels.map(c => c.channel_id);
+  const placeholders = channelIds.map(() => '?').join(',');
+
+  // Build effective weights in JS with overrides applied
+  const ceiling = ceilingOverride ?? getProfileBehaviorCeiling(profileId);
+  const persistedSettings = getTagSettings(profileId);
+
+  const behaviorInterests = db.prepare(`
+    SELECT tag, weight FROM profile_interests
+    WHERE profile_id = ? AND source = 'behavior'
+  `).all(profileId);
+
+  // Compute scaled weights with overrides
+  const scaledWeights = {};
+  let maxScaled = 0;
+  for (const row of behaviorInterests) {
+    const override = overrides[row.tag];
+    const persisted = persistedSettings[row.tag];
+    const multiplier = override?.multiplier ?? persisted?.multiplier ?? 1.0;
+    const scaled = row.weight * multiplier;
+    scaledWeights[row.tag] = { scaled, hard_cap: override?.hard_cap ?? persisted?.hard_cap ?? null };
+    if (scaled > maxScaled) maxScaled = scaled;
+  }
+
+  // Normalize to effective weights
+  const effectiveWeights = {};
+  for (const [tag, { scaled, hard_cap }] of Object.entries(scaledWeights)) {
+    const normalized = maxScaled > 0 ? (scaled / maxScaled) * ceiling : 0;
+    effectiveWeights[tag] = hard_cap !== null ? Math.min(normalized, hard_cap) : normalized;
+  }
+
+  // Build zeroed and penalized tag sets from combined overrides + persisted
+  const zeroedTags = new Set();
+  const penalizedTags = {};  // tag → multiplier
+  for (const row of behaviorInterests) {
+    const mult = overrides[row.tag]?.multiplier ?? persistedSettings[row.tag]?.multiplier ?? 1.0;
+    if (mult === 0) zeroedTags.add(row.tag);
+    else if (mult < 1.0) penalizedTags[row.tag] = mult;
+  }
+
+  // Get all approved videos from whitelisted channels
+  const videos = db.prepare(`
+    SELECT v.video_id, v.title, v.thumbnail_url, v.channel_name, v.channel_id, v.processed_at,
+      c.thumbnail_url AS channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c
+      ON v.channel_id = c.channel_id
+    WHERE v.channel_id IN (${placeholders})
+      AND v.status = 'approved'
+      AND v.video_id NOT IN (
+        SELECT value FROM filter_rules
+        WHERE rule_type = 'video_block'
+          AND (profile_id = ? OR profile_id IS NULL)
+      )
+  `).all([...channelIds, profileId]);
+
+  // Get watch completion data
+  const watchMap = {};
+  const watchRows = db.prepare(`
+    SELECT video_id,
+      SUM(CASE WHEN duration_seconds > 0
+            THEN MIN(CAST(progress_seconds AS REAL) / duration_seconds, 1.0)
+            ELSE 0 END) AS total_completed
+    FROM watch_history
+    WHERE profile_id = ? AND watched_at > datetime('now', '-30 days')
+    GROUP BY video_id
+  `).all(profileId);
+  for (const r of watchRows) watchMap[r.video_id] = r.total_completed;
+
+  // Get all video tags in bulk
+  const allTags = db.prepare(`
+    SELECT video_id, tag FROM video_tags
+    WHERE video_id IN (${videos.map(() => '?').join(',')})
+  `).all(videos.map(v => v.video_id));
+
+  const tagsByVideo = {};
+  for (const row of allTags) {
+    if (!tagsByVideo[row.video_id]) tagsByVideo[row.video_id] = [];
+    tagsByVideo[row.video_id].push(row.tag);
+  }
+
+  // Score each video
+  const scored = [];
+  for (const v of videos) {
+    const tags = tagsByVideo[v.video_id] || [];
+
+    // Hard exclude: skip if any tag is zeroed
+    if (tags.some(t => zeroedTags.has(t))) continue;
+
+    const matchedTags = tags.filter(t => effectiveWeights[t]);
+    const interestScore = Math.min(
+      matchedTags.reduce((sum, t) => sum + (effectiveWeights[t] || 0), 0),
+      4.0
+    );
+
+    // Penalty: multiply penalties for each penalized tag the video carries
+    let penalty = 1.0;
+    for (const t of tags) {
+      if (penalizedTags[t]) penalty *= penalizedTags[t];
+    }
+
+    const recencyBoost = v.processed_at && new Date(v.processed_at) > new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) ? 1.0 : 0.0;
+    const watchPenalty = 1.0 / (1.0 + (watchMap[v.video_id] || 0) * 0.5);
+    // Fixed randomness factor for stable preview (0.85)
+    const score = (Math.max(interestScore, 0.5) + recencyBoost) * penalty * watchPenalty * 0.85;
+
+    scored.push({
+      video_id: v.video_id,
+      title: v.title,
+      thumbnail_url: v.thumbnail_url,
+      channel_name: v.channel_name,
+      channel_thumbnail_img: v.channel_thumbnail_img,
+      score: Math.round(score * 100) / 100,
+      interestScore: Math.round(interestScore * 100) / 100,
+      matchedTags,
+    });
+  }
+
+  // Sort by score descending, apply channel diversity (max 2 per channel)
+  scored.sort((a, b) => b.score - a.score);
+  const result = [];
+  const channelCounts = {};
+  for (const v of scored) {
+    const chKey = v.channel_name || v.video_id;
+    channelCounts[chKey] = (channelCounts[chKey] || 0) + 1;
+    if (channelCounts[chKey] <= 2) {
+      result.push(v);
+      if (result.length >= 18) break;
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -1143,6 +1484,8 @@ module.exports = {
   upsertTagSetting,
   deleteTagSetting,
   getEffectiveInterests,
+  getInsightsAnalytics,
+  getFeedPreview,
   upsertChannelRecommendation,
   getChannelRecommendations,
   getAllChannelRecommendations,

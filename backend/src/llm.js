@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
+const { getCanonicalList, normalizeTags } = require('./tags');
 
 /**
  * Returns a smart transcript sample:
@@ -36,7 +37,9 @@ Evaluate the video and return ONLY a JSON object with three fields:
 - "reason" (string, max 100 chars, only populated if approved is false)
 - "tags" (array of 3–5 lowercase hyphenated topic tags, e.g. ["outer-space", "minecraft", "planets"])
 
-For tags: use the YouTube topic categories and creator tags as context clues. Prefer specific over generic.
+For tags: pick from this canonical list when possible. Only invent a new tag if nothing fits:
+${getCanonicalList().join(', ')}
+Use the YouTube topic categories and creator tags as context clues. Prefer specific over generic.
 
 Reject content with: violence or fighting, horror or jump scares, adult humor or innuendo, strong language or name-calling, scary/disturbing themes, dangerous activities children might imitate, creators who regularly yell or demean others.
 Approve content that is: educational, entertaining for children, age-appropriate gaming, general family content.
@@ -61,7 +64,7 @@ function parseResponse(text) {
     return {
       approved: !!parsed.approved,
       reason:   parsed.reason || null,
-      tags:     Array.isArray(parsed.tags) ? parsed.tags.map(t => String(t).toLowerCase().trim()) : [],
+      tags:     Array.isArray(parsed.tags) ? normalizeTags(parsed.tags.map(t => String(t).toLowerCase().trim())) : [],
     };
   } catch {
     console.warn('LLM response parse failed, defaulting to approve:', text.slice(0, 100));
