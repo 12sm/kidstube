@@ -273,15 +273,22 @@ app.get('/api/stream/:videoId', async (req, res) => {
     // Innertube for metadata + Invidious for URLs — in parallel
     const [innertubeResult, videoUrl, audioUrl] = await Promise.all([
       innertube.getStreamInfo(videoId),
-      resolveInvidiousUrl(videoId, 136).catch(() => null),  // 720p avc1
+      resolveInvidiousUrl(videoId, 137).catch(() => null),  // 1080p avc1
       resolveInvidiousUrl(videoId, 140).catch(() => null),  // best m4a audio
     ]);
 
+    // Fall back to 720p if 1080p not available
+    let resolvedVideoUrl = videoUrl;
+    if (!resolvedVideoUrl) {
+      resolvedVideoUrl = await resolveInvidiousUrl(videoId, 136).catch(() => null);
+    }
+
     const { formats, durationMs } = innertubeResult;
-    const videoMeta = formats.find(f => f.itag === 136);
+    const videoItag = resolvedVideoUrl === videoUrl ? 137 : 136;
+    const videoMeta = formats.find(f => f.itag === videoItag) || formats.find(f => f.itag === 137) || formats.find(f => f.itag === 136);
     const audioMeta = formats.find(f => f.itag === 140);
 
-    if (!videoUrl || !audioUrl || !videoMeta || !audioMeta) {
+    if (!resolvedVideoUrl || !audioUrl || !videoMeta || !audioMeta) {
       // Fallback to 360p muxed mp4
       const muxedUrl = await resolveInvidiousUrl(videoId, 18);
       if (!muxedUrl) throw new Error('No playable stream found');
@@ -291,9 +298,9 @@ app.get('/api/stream/:videoId', async (req, res) => {
       return res.json({ url: proxyUrl, type: 'mp4', cached: false });
     }
 
-    console.log(`[stream] OK ${videoId} dash=720p in ${Date.now() - t0}ms`);
+    console.log(`[stream] OK ${videoId} dash=${videoMeta.height}p in ${Date.now() - t0}ms`);
     streamCache.set(videoId, {
-      videoUrl, audioUrl, videoMeta, audioMeta, durationMs,
+      videoUrl: resolvedVideoUrl, audioUrl, videoMeta, audioMeta, durationMs,
       expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
     });
 
