@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="MainScene" extends="Scene">
+    <script type="text/brightscript" uri="pkg:/components/RemoteKeys.brs" />
+    <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+    <children>
+        <!-- Profile selection screen -->
+        <Group id="profileUI">
+            <Rectangle width="1280" height="720" color="0x0F0F0FFF" />
+            <Label id="profileTitle" text="Who's watching?"
+                   width="1280" horizAlign="center"
+                   translation="[0, 180]"
+                   font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+            <Group id="profileCards" translation="[0, 280]">
+                <Group id="child1Card" translation="[340, 0]">
+                    <Rectangle id="child1Bg" width="200" height="200" color="0x282828FF" cornerRadius="8" />
+                    <Poster id="child1Avatar" width="200" height="200" loadDisplayMode="scaleToZoom" />
+                    <Rectangle id="child1Focus" width="200" height="200" color="0x00000000" cornerRadius="8" />
+                    <Label text="Child1" width="200" horizAlign="center"
+                           translation="[0, 210]"
+                           font="font:MediumBoldSystemFont" color="0xFFFFFFFF" />
+                </Group>
+                <Group id="child2Card" translation="[740, 0]">
+                    <Rectangle id="child2Bg" width="200" height="200" color="0x282828FF" cornerRadius="8" />
+                    <Poster id="child2Avatar" width="200" height="200" loadDisplayMode="scaleToZoom" />
+                    <Rectangle id="child2Focus" width="200" height="200" color="0x00000000" cornerRadius="8" />
+                    <Label text="Child2" width="200" horizAlign="center"
+                           translation="[0, 210]"
+                           font="font:MediumBoldSystemFont" color="0xFFFFFFFF" />
+                </Group>
+            </Group>
+        </Group>
+
+        <!-- Main app layout (hidden until profile selected) -->
+        <Group id="appLayout" visible="false">
+            <NavBar id="navBar" />
+            <Group id="contentArea" translation="[80, 0]">
+                <Group id="homeWrapper" />
+            </Group>
+            <Group id="videoContainer" />
+        </Group>
+    </children>
+</component>
