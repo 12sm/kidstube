@@ -114,4 +114,26 @@ async function runLlmCheck(video, opts = {}) {
   }
 }
 
-module.exports = { runLlmCheck, smartSampleTranscript };
+async function extractSearchQuery(rawSpeech) {
+  if (!rawSpeech || !rawSpeech.trim()) return rawSpeech;
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || apiKey === 'placeholder') return rawSpeech;
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5',
+      max_tokens: 30,
+      system:     'You convert children\'s speech into YouTube search queries. Return ONLY search keywords, 2-6 words. No quotes, no explanation, no questions, no commentary. If the speech is unclear or not a video request, still return your best guess at search terms. Never ask for clarification. Never say you need more information. Just output keywords.',
+      messages:   [{ role: 'user', content: rawSpeech }],
+    });
+    const result = (response.content[0]?.text || '').trim();
+    return result || rawSpeech;
+  } catch (err) {
+    console.error('[LLM] extractSearchQuery failed, using raw speech:', err.message);
+    return rawSpeech;
+  }
+}
+
+module.exports = { runLlmCheck, smartSampleTranscript, extractSearchQuery };

@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePlayerContext } from '../contexts/PlayerContext.jsx';
 
-const MINI_W  = 192;
-const MINI_H  = Math.round(MINI_W * 9 / 16); // 108
+// Mini player sizing — larger on iPad to match native YouTube
+const IS_WIDE = window.innerWidth >= 768;
+const MINI_W  = IS_WIDE ? 280 : 192;
+const MINI_H  = Math.round(MINI_W * 9 / 16);
 const BOTTOM_NAV_H = 68;
 const AUTOPLAY_SECS = 5;
 const CONTROLS_HIDE_MS = 3500;
@@ -296,6 +298,14 @@ export default function MiniPlayer() {
     setCurrentTime(Math.floor(seconds));
   };
 
+  // Mini-player swipe state (hooks must be before early returns)
+  const [miniSwipeX, setMiniSwipeX]       = useState(0);
+  const [miniSwiping, setMiniSwiping]     = useState(false);
+  const [miniCollapsed, setMiniCollapsed] = useState(false);
+  const miniTouchStartX = useRef(0);
+  const miniTouchStartY = useRef(0);
+  const miniSwipeDir    = useRef(null); // 'h' | 'v' | null
+
   if (!videoId) return null;
 
   const onWatchPage   = location.pathname.startsWith('/watch/');
@@ -322,16 +332,73 @@ export default function MiniPlayer() {
     transition: 'none',
   };
 
-  const miniTop  = dims.h - safeBottom - BOTTOM_NAV_H - MINI_H - 4;
+  const miniTop  = dims.h - safeBottom - BOTTOM_NAV_H - MINI_H - 12;
   const miniLeft = dims.w - 16 - MINI_W;
-  const miniStyle = {
-    position: 'fixed', top: miniTop, left: miniLeft,
-    width: MINI_W, height: MINI_H,
-    zIndex: 40, borderRadius: 12, overflow: 'hidden',
-    transition: 'top 0.35s cubic-bezier(0.4,0,0.2,1), left 0.35s cubic-bezier(0.4,0,0.2,1), width 0.35s cubic-bezier(0.4,0,0.2,1), height 0.35s cubic-bezier(0.4,0,0.2,1), border-radius 0.35s ease',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
-    border: '1px solid rgba(255,255,255,0.1)',
+
+  const onMiniTouchStart = (e) => {
+    miniTouchStartX.current = e.touches[0].clientX;
+    miniTouchStartY.current = e.touches[0].clientY;
+    miniSwipeDir.current    = null;
+    setMiniSwiping(true);
   };
+  const onMiniTouchMove = (e) => {
+    if (!miniSwiping) return;
+    const dx = e.touches[0].clientX - miniTouchStartX.current;
+    const dy = e.touches[0].clientY - miniTouchStartY.current;
+    // Lock direction after 8px of movement
+    if (!miniSwipeDir.current && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      miniSwipeDir.current = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+    }
+    if (miniSwipeDir.current === 'h') {
+      // Swipe right to collapse into edge drawer
+      setMiniSwipeX(Math.max(0, dx));
+    } else if (miniSwipeDir.current === 'v') {
+      // Swipe down to dismiss entirely
+      setMiniSwipeX(Math.max(0, dy));
+    }
+  };
+  const onMiniTouchEnd = () => {
+    if (miniSwipeDir.current === 'v' && miniSwipeX > 40) {
+      // Swipe down — close entirely
+      close();
+    } else if (miniSwipeDir.current === 'h' && miniSwipeX > MINI_W * 0.35) {
+      // Swipe right — collapse to edge arrow
+      setMiniCollapsed(true);
+    }
+    setMiniSwipeX(0);
+    setMiniSwiping(false);
+    miniSwipeDir.current = null;
+  };
+
+  // Swipe transform: horizontal slides right, vertical slides down
+  const swipeTransform = miniSwiping && miniSwipeX > 0
+    ? miniSwipeDir.current === 'v'
+      ? `translateY(${miniSwipeX}px)`
+      : `translateX(${miniSwipeX}px)`
+    : undefined;
+  const swipeOpacity = miniSwiping && miniSwipeX > 0
+    ? Math.max(0, 1 - miniSwipeX / (miniSwipeDir.current === 'v' ? MINI_H * 2 : MINI_W))
+    : 1;
+
+  const miniStyle = miniCollapsed
+    ? {
+        // Collapsed: thin arrow tab on right edge
+        position: 'fixed', top: miniTop + MINI_H / 2 - 24, left: dims.w - 28,
+        width: 28, height: 48,
+        zIndex: 40, borderRadius: '12px 0 0 12px', overflow: 'hidden',
+        transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+      }
+    : {
+        position: 'fixed', top: miniTop, left: miniLeft,
+        width: MINI_W, height: MINI_H,
+        zIndex: 40, borderRadius: 12, overflow: 'hidden',
+        transform: swipeTransform,
+        opacity: swipeOpacity,
+        transition: miniSwiping ? 'none' : 'top 0.35s cubic-bezier(0.4,0,0.2,1), left 0.35s cubic-bezier(0.4,0,0.2,1), width 0.35s cubic-bezier(0.4,0,0.2,1), height 0.35s cubic-bezier(0.4,0,0.2,1), border-radius 0.35s ease, transform 0.25s ease, opacity 0.25s ease',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+        border: '1px solid rgba(255,255,255,0.1)',
+      };
 
   const src =
     `https://www.youtube.com/embed/${videoId}` +
@@ -417,7 +484,7 @@ export default function MiniPlayer() {
     : { position: 'fixed', top: fullTop, left: 0, width: fullW, height: Math.round(fullW * 9 / 16), zIndex: 55 };
 
   return (
-    <div style={showFullViewport ? landscapeStyle : showFull ? fullStyle : miniStyle} className="bg-black">
+    <div data-mini-player style={showFullViewport ? landscapeStyle : showFull ? fullStyle : miniStyle} className="bg-black">
 
       <iframe
         key={videoId}
@@ -722,31 +789,48 @@ export default function MiniPlayer() {
         </div>
       )}
 
-      {/* ── Mini-mode: tap body to expand, play top-left, close top-right ── */}
-      {minimized && (
+      {/* ── Mini-mode: swipe to manage, tap to expand, play/close buttons ── */}
+      {minimized && !miniCollapsed && (
         <>
-          {/* Full tap blocker — anywhere on the thumbnail expands back to main player */}
-          <div className="absolute inset-0 z-[5]" onClick={handleExpand} />
+          {/* Full tap/swipe layer — swipe right to collapse, swipe down to close, tap to expand */}
+          <div
+            className="absolute inset-0 z-[5]"
+            onClick={handleExpand}
+            onTouchStart={onMiniTouchStart}
+            onTouchMove={onMiniTouchMove}
+            onTouchEnd={onMiniTouchEnd}
+          />
           {/* Play/pause — top left */}
           <button
             onClick={(e) => { e.stopPropagation(); postCmd(playing ? 'pauseVideo' : 'playVideo', ''); }}
-            className="absolute top-1 left-1 z-10 p-1 bg-black/60 rounded-full"
+            className="absolute top-1 left-1 z-10 p-1.5 bg-black/60 rounded-full"
             aria-label={playing ? 'Pause' : 'Play'}
           >
             {playing
-              ? <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-              : <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M8 5v14l11-7z"/></svg>
+              ? <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              : <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M8 5v14l11-7z"/></svg>
             }
           </button>
           {/* Close — top right */}
           <button
             onClick={handleClose}
-            className="absolute top-1 right-1 z-10 p-1 bg-black/60 rounded-full"
+            className="absolute top-1 right-1 z-10 p-1.5 bg-black/60 rounded-full"
             aria-label="Close"
           >
-            <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
           </button>
         </>
+      )}
+      {/* ── Collapsed edge arrow — tap to restore mini player ── */}
+      {minimized && miniCollapsed && (
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center bg-yt-card cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); setMiniCollapsed(false); }}
+        >
+          <svg viewBox="0 0 24 24" className="w-5 h-5 fill-yt-text">
+            <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+          </svg>
+        </div>
       )}
     </div>
   );

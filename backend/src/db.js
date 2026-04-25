@@ -334,6 +334,20 @@ function migrate() {
     console.log(`Tag normalization complete: ${tagCount.cnt} unique video tags, ${interestCount.cnt} unique interest tags`);
   }
 
+  // Migrate: add discovery_source to videos
+  const hasDiscoverySource = db.prepare("SELECT 1 FROM pragma_table_info('videos') WHERE name='discovery_source'").get();
+  if (!hasDiscoverySource) {
+    db.exec("ALTER TABLE videos ADD COLUMN discovery_source TEXT DEFAULT 'subscription'");
+    console.log('Videos table: added discovery_source column');
+  }
+
+  // Migrate: add raw_speech to search_queries
+  const hasRawSpeech = db.prepare("SELECT 1 FROM pragma_table_info('search_queries') WHERE name='raw_speech'").get();
+  if (!hasRawSpeech) {
+    db.exec('ALTER TABLE search_queries ADD COLUMN raw_speech TEXT');
+    console.log('Search queries table: added raw_speech column');
+  }
+
   console.log('Database migrated successfully');
 }
 
@@ -408,15 +422,16 @@ function videoExists(videoId) {
 }
 
 function insertVideo(video) {
+  if (!video.discovery_source) video.discovery_source = 'subscription';
   getDb().prepare(`
     INSERT INTO videos
       (video_id, channel_id, channel_name, channel_thumbnail, title, description,
        thumbnail_url, transcript, duration_seconds, published_at,
-       status, is_recommended, source_video_id, view_count, needs_llm_review)
+       status, is_recommended, source_video_id, view_count, needs_llm_review, discovery_source)
     VALUES
       (@video_id, @channel_id, @channel_name, @channel_thumbnail, @title, @description,
        @thumbnail_url, @transcript, @duration_seconds, @published_at,
-       @status, @is_recommended, @source_video_id, @view_count, @needs_llm_review)
+       @status, @is_recommended, @source_video_id, @view_count, @needs_llm_review, @discovery_source)
     ON CONFLICT(video_id) DO UPDATE SET
       title            = COALESCE(excluded.title, title),
       description      = COALESCE(excluded.description, description),
@@ -445,17 +460,21 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
   const offset = page * limit;
 
   return getDb().prepare(`
-    WITH effective_interests AS (
+    WITH raw_interests AS (
       SELECT pi.tag,
         pi.weight * COALESCE(its.multiplier, 1.0)              AS scaled,
         COALESCE(its.hard_cap, NULL)                            AS hard_cap,
-        p.behavior_weight_ceiling                               AS ceiling,
-        MAX(pi.weight * COALESCE(its.multiplier, 1.0)) OVER () AS max_scaled
+        p.behavior_weight_ceiling                               AS ceiling
       FROM profile_interests pi
       JOIN profiles p ON p.id = pi.profile_id
       LEFT JOIN interest_tag_settings its
         ON its.profile_id = pi.profile_id AND its.tag = pi.tag
       WHERE pi.profile_id = ? AND pi.source = 'behavior'
+    ),
+    effective_interests AS (
+      SELECT tag, scaled, hard_cap, ceiling,
+        (SELECT MAX(scaled) FROM raw_interests WHERE hard_cap IS NULL) AS max_scaled
+      FROM raw_interests
     ),
     eff_weights AS (
       SELECT tag,
@@ -1064,13 +1083,13 @@ function applyChannelRecommendation(channelId, profileId) {
 
 // --- Search queries ---
 
-function saveSearchQuery(profileId, query) {
+function saveSearchQuery(profileId, query, rawSpeech = null) {
   const rawDb = getDb();
   rawDb.prepare(`
-    INSERT INTO search_queries (profile_id, query, searched_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(profile_id, query) DO UPDATE SET searched_at = datetime('now')
-  `).run(profileId, query);
+    INSERT INTO search_queries (profile_id, query, raw_speech, searched_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(profile_id, query) DO UPDATE SET searched_at = datetime('now'), raw_speech = COALESCE(?, raw_speech)
+  `).run(profileId, query, rawSpeech, rawSpeech);
 
   // Trim to 20 most recent
   rawDb.prepare(`
@@ -1087,11 +1106,15 @@ function saveSearchQuery(profileId, query) {
 
 function getSearchHistory(profileId) {
   return getDb().prepare(`
-    SELECT query FROM search_queries
+    SELECT query, raw_speech, searched_at FROM search_queries
     WHERE profile_id = ?
     ORDER BY searched_at DESC
     LIMIT 20
-  `).all(profileId).map(r => r.query);
+  `).all(profileId);
+}
+
+function getSearchHistoryQueries(profileId) {
+  return getSearchHistory(profileId).map(r => r.query);
 }
 
 function deleteSearchQuery(profileId, query) {
@@ -1205,7 +1228,7 @@ function bulkApplyChannelRecommendations(profileId, channelIds = null) {
 
 // --- Insights analytics ---
 
-function getInsightsAnalytics(profileId, days = 30) {
+function getInsightsAnalytics(profileId, days = 30, opts = {}) {
   const db = getDb();
 
   const watchTimeByDay = db.prepare(`
@@ -1217,8 +1240,12 @@ function getInsightsAnalytics(profileId, days = 30) {
     ORDER BY date
   `).all(profileId, days);
 
+  const tzOffset = opts?.tzOffset ?? 0; // minutes, e.g. -300 for CDT
+  const tzOffsetHours = tzOffset / 60; // e.g. -5 for CDT
+  const tzModifier = `${tzOffset >= 0 ? '+' : '-'}${Math.abs(tzOffsetHours)} hours`;
+
   const watchTimeByHour = db.prepare(`
-    SELECT CAST(strftime('%H', wh.watched_at) AS INTEGER) AS hour,
+    SELECT CAST(strftime('%H', wh.watched_at, '${tzModifier}') AS INTEGER) AS hour,
       ROUND(SUM(wh.progress_seconds) / 60.0, 1) AS minutes
     FROM watch_history wh
     WHERE wh.profile_id = ? AND wh.watched_at > datetime('now', '-' || ? || ' days')
@@ -1495,6 +1522,7 @@ module.exports = {
   getApprovedVideoCountByChannel,
   saveSearchQuery,
   getSearchHistory,
+  getSearchHistoryQueries,
   deleteSearchQuery,
   searchApprovedVideos,
   getSearchSuggestions,

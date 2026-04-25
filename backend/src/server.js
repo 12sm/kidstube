@@ -13,6 +13,7 @@ const filter = require('./filter');
 const recommendations = require('./recommendations');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const childProfile = require('./childProfile');
+const { extractSearchQuery } = require('./llm');
 const { fetchVideoData } = require('./ytdlp');
 const innertube = require('./innertube');
 const dash = require('./dash');
@@ -342,43 +343,41 @@ app.post('/api/admin/video/:videoId/react', requireAdmin, (req, res) => {
 app.get('/api/search', async (req, res) => {
   const q         = (req.query.q || '').trim();
   const profileId = parseInt(req.query.profile_id);
+  const rawSpeech = req.query.raw_speech || null;
   if (!q || !profileId) return res.status(400).json({ error: 'Missing q or profile_id' });
 
-  // Save to search history
-  db.saveSearchQuery(profileId, q);
+  // Save to search history (with raw speech if voice search)
+  db.saveSearchQuery(profileId, q, rawSpeech);
 
-  // 1. Search approved library
+  // 1. Search approved library (whitelisted channels)
   const dbResults = db.searchApprovedVideos(profileId, q);
 
-  // 2. If sparse, supplement with YouTube API
+  // 2. Always supplement with open YouTube search
   let apiResults = [];
-  if (dbResults.length < 5) {
-    const channels    = db.getWhitelistedChannels(profileId);
-    const channelIds  = channels.map(c => c.channel_id);
-    const filterRules = db.getFilterRules(profileId);
-    const apiVideos   = await youtube.searchVideos(q, channelIds, 20);
+  const filterRules = db.getFilterRules(profileId);
+  const apiVideos   = await youtube.searchVideos(q, { open: true, maxResults: 20 });
 
-    for (const video of apiVideos) {
-      if (db.videoExists(video.video_id)) continue;
-      if (filter.isShort(video) || filter.isLive(video)) continue;
-      const filterResult = filter.runFilterPass(video, filterRules);
-      if (filterResult.rejected) continue;
+  for (const video of apiVideos) {
+    if (db.videoExists(video.video_id)) continue;
+    if (filter.isShort(video) || filter.isLive(video)) continue;
+    const filterResult = filter.runFilterPass(video, filterRules);
+    if (filterResult.rejected) continue;
 
-      db.insertVideo({
-        ...video,
-        transcript:       null,
-        channel_thumbnail: null,
-        status:           'approved',
-        is_recommended:   0,
-        source_video_id:  null,
-        view_count:       null,
-        needs_llm_review: 1,
-      });
-      apiResults.push(video);
-    }
+    db.insertVideo({
+      ...video,
+      transcript:       null,
+      channel_thumbnail: null,
+      status:           'approved',
+      is_recommended:   0,
+      source_video_id:  null,
+      view_count:       null,
+      needs_llm_review: 1,
+      discovery_source: 'search',
+    });
+    apiResults.push(video);
   }
 
-  // Merge: DB hits first, then newly imported API hits, deduped
+  // Merge: whitelisted DB hits first, then open YouTube results, deduped
   const seen = new Set(dbResults.map(v => v.video_id));
   const merged = [
     ...dbResults,
@@ -388,10 +387,41 @@ app.get('/api/search', async (req, res) => {
   res.json({ results: merged });
 });
 
+// Voice-to-intent: convert natural speech to search keywords
+app.post('/api/search/voice-intent', async (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: 'Missing text' });
+
+  const query = await extractSearchQuery(text.trim());
+  res.json({ query });
+});
+
+// Whisper STT proxy: accepts raw audio blob, returns transcribed text
+app.post('/api/search/transcribe', express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '10mb' }), async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(400).json({ error: 'OpenAI API key required' });
+  try {
+    const mimeType = req.headers['content-type'] || 'audio/webm';
+    const FormData = (await import('form-data')).default;
+    const formData = new FormData();
+    formData.append('file', req.body, { filename: 'audio.webm', contentType: mimeType });
+    formData.append('model', 'whisper-1');
+    const axios = require('axios');
+    const r = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+      headers: { ...formData.getHeaders(), Authorization: `Bearer ${apiKey}` },
+      maxContentLength: 25 * 1024 * 1024,
+    });
+    res.json({ text: r.data.text || '' });
+  } catch (err) {
+    console.error('[Transcribe] Failed:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Transcription failed' });
+  }
+});
+
 app.get('/api/search/history', (req, res) => {
   const profileId = parseInt(req.query.profile_id);
   if (!profileId) return res.status(400).json({ error: 'Missing profile_id' });
-  const history = db.getSearchHistory(profileId);
+  const history = db.getSearchHistory(profileId).map(r => r.query);
   res.json({ history });
 });
 
@@ -454,7 +484,8 @@ app.post('/api/admin/behavior-ceiling/:profileId', requireAdmin, (req, res) => {
 app.get('/api/admin/insights/:profileId', requireAdmin, (req, res) => {
   const profileId = parseInt(req.params.profileId);
   const days = parseInt(req.query.days) || 30;
-  const analytics = db.getInsightsAnalytics(profileId, days);
+  const tzOffset = req.query.tz_offset != null ? parseInt(req.query.tz_offset) : 0;
+  const analytics = db.getInsightsAnalytics(profileId, days, { tzOffset });
   res.json(analytics);
 });
 

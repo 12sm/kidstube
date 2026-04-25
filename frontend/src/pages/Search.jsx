@@ -5,6 +5,9 @@ import VideoCard from '../components/VideoCard.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Always show mic button — getUserMedia may not be detectable on HTTP/iOS,
+// but we handle errors gracefully when tapped
+const hasMic = true;
 
 export default function Search() {
   const { profileId } = useContext(ProfileContext);
@@ -21,6 +24,8 @@ export default function Search() {
   const [loading, setLoading]       = useState(false);
   const [listening, setListening]   = useState(false);
   const [voiceError, setVoiceError] = useState('');
+  const [interimText, setInterimText] = useState('');
+  const [voiceOverlay, setVoiceOverlay] = useState(false);
 
   // Redirect if no profile
   useEffect(() => {
@@ -41,7 +46,7 @@ export default function Search() {
       .catch(() => {});
   }, [profileId]);
 
-  const doSearch = async (q) => {
+  const doSearch = async (q, rawSpeech = null) => {
     const trimmed = q.trim();
     if (!trimmed) return;
     setQuery(trimmed);
@@ -51,7 +56,9 @@ export default function Search() {
     setResults([]);
     inputRef.current?.blur();
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&profile_id=${profileId}`);
+      let url = `/api/search?q=${encodeURIComponent(trimmed)}&profile_id=${profileId}`;
+      if (rawSpeech) url += `&raw_speech=${encodeURIComponent(rawSpeech)}`;
+      const res = await fetch(url);
       const data = await res.json();
       setResults(data.results || []);
       fetch(`/api/search/history?profile_id=${profileId}`)
@@ -112,38 +119,154 @@ export default function Search() {
   };
 
   // ── Voice search ─────────────────────────────────────────────────────────────
+  // Uses SpeechRecognition (live interim text) when available (Chrome/desktop),
+  // falls back to MediaRecorder + Whisper (iOS Safari).
+  const mediaRef = useRef(null);
+  const chunksRef = useRef([]);
+  const recognitionRef2 = useRef(null);
+  const [transcribing, setTranscribing] = useState(false);
 
-  const startVoice = () => {
-    if (!SpeechRecognition) return;
-    if (listening) {
-      recognitionRef.current?.stop();
-      return;
+  const processTranscript = async (transcript) => {
+    setInterimText(transcript);
+    setTranscribing(true);
+    try {
+      const iRes = await fetch('/api/search/voice-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: transcript }),
+      });
+      const iData = await iRes.json();
+      const searchQuery = iData.query || transcript;
+      setVoiceOverlay(false);
+      setTranscribing(false);
+      setQuery(searchQuery);
+      doSearch(searchQuery, transcript);
+    } catch {
+      setVoiceOverlay(false);
+      setTranscribing(false);
+      doSearch(transcript);
     }
+  };
 
-    setVoiceError('');
+  const startVoiceBrowser = () => {
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang = 'en-US';
-    recognitionRef.current = recognition;
+    recognitionRef2.current = recognition;
 
     recognition.onstart = () => setListening(true);
     recognition.onend   = () => setListening(false);
     recognition.onerror = (e) => {
       setListening(false);
+      setVoiceOverlay(false);
+      setInterimText('');
       if (e.error !== 'aborted' && e.error !== 'no-speech') {
         setVoiceError(e.error === 'not-allowed' ? 'Microphone access denied' : 'Voice search failed');
         setTimeout(() => setVoiceError(''), 3000);
       }
     };
     recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      setQuery(transcript);
-      setSuggestions([]);
-      doSearch(transcript);
+      const result = e.results[0];
+      const transcript = result[0].transcript;
+      if (!result.isFinal) {
+        setInterimText(transcript);
+        return;
+      }
+      setListening(false);
+      if (transcript.trim()) processTranscript(transcript.trim());
+      else { setVoiceOverlay(false); }
     };
-
     recognition.start();
+    setListening(true);
+  };
+
+  const startVoiceWhisper = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        if (blob.size < 1000) {
+          setVoiceOverlay(false);
+          setListening(false);
+          return;
+        }
+        setListening(false);
+        setTranscribing(true);
+        setInterimText('');
+        try {
+          const tRes = await fetch('/api/search/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'audio/webm' },
+            body: blob,
+          });
+          const tData = await tRes.json();
+          const transcript = tData.text?.trim();
+          if (!transcript) {
+            setVoiceOverlay(false);
+            setTranscribing(false);
+            return;
+          }
+          await processTranscript(transcript);
+        } catch {
+          setVoiceOverlay(false);
+          setTranscribing(false);
+          setVoiceError('Voice search failed');
+          setTimeout(() => setVoiceError(''), 3000);
+        }
+      };
+      mr.start();
+      mediaRef.current = mr;
+      setListening(true);
+    } catch {
+      setVoiceOverlay(false);
+      setVoiceError('Microphone access denied');
+      setTimeout(() => setVoiceError(''), 3000);
+    }
+  };
+
+  const startVoice = () => {
+    if (!hasMic) return;
+    if (listening) { stopVoice(); return; }
+
+    setVoiceError('');
+    setInterimText('');
+    setVoiceOverlay(true);
+
+    if (SpeechRecognition) {
+      startVoiceBrowser();
+    } else {
+      startVoiceWhisper();
+    }
+  };
+
+  const stopVoice = () => {
+    if (recognitionRef2.current) {
+      recognitionRef2.current.stop();
+    }
+    if (mediaRef.current?.state === 'recording') {
+      mediaRef.current.stop();
+    }
+  };
+
+  const cancelVoice = () => {
+    if (recognitionRef2.current) {
+      recognitionRef2.current.abort?.();
+      recognitionRef2.current = null;
+    }
+    if (mediaRef.current?.state === 'recording') {
+      mediaRef.current.ondataavailable = null;
+      mediaRef.current.onstop = () => {};
+      mediaRef.current.stop();
+    }
+    setVoiceOverlay(false);
+    setListening(false);
+    setTranscribing(false);
+    setInterimText('');
   };
 
   // Filtered history for the suggestion area
@@ -175,7 +298,7 @@ export default function Search() {
         </button>
 
         <form
-          className="flex-1 flex items-center gap-2 bg-yt-card border border-yt-border rounded-full px-4 py-2"
+          className="flex-1 flex items-center bg-yt-card border border-yt-border rounded-full px-4 py-2"
           onSubmit={e => { e.preventDefault(); doSearch(query); }}
         >
           <input
@@ -186,44 +309,40 @@ export default function Search() {
             placeholder="Search YouTube"
             className="flex-1 bg-transparent text-yt-text placeholder-yt-muted text-sm outline-none"
           />
-          {query ? (
+          {query && (
             <>
               <button
                 type="button"
                 onClick={clearSearch}
-                className="text-yt-muted hover:text-yt-text flex-shrink-0"
+                className="text-yt-muted hover:text-yt-text flex-shrink-0 ml-2"
                 aria-label="Clear"
               >
                 <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
                   <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
                 </svg>
               </button>
-              <button type="submit" className="text-yt-muted hover:text-yt-text flex-shrink-0" aria-label="Search">
+              <button type="submit" className="text-yt-muted hover:text-yt-text flex-shrink-0 ml-2" aria-label="Search">
                 <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
                   <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                 </svg>
               </button>
             </>
-          ) : SpeechRecognition ? (
-            <button
-              type="button"
-              onClick={startVoice}
-              className={`flex-shrink-0 transition-colors ${listening ? 'text-red-500' : 'text-yt-muted hover:text-yt-text'}`}
-              aria-label={listening ? 'Stop listening' : 'Voice search'}
-            >
-              {listening ? (
-                // Animated mic while recording
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current animate-pulse">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
-                </svg>
-              )}
-            </button>
-          ) : null}
+          )}
         </form>
+
+        {/* Mic button — always visible, outside the search bar like YouTube */}
+        {hasMic && (
+          <button
+            type="button"
+            onClick={startVoice}
+            className="flex-shrink-0 p-2 text-yt-muted hover:text-yt-text transition-colors"
+            aria-label="Voice search"
+          >
+            <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Voice error toast */}
@@ -233,18 +352,81 @@ export default function Search() {
         </div>
       )}
 
-      {/* Listening indicator */}
-      {listening && (
-        <div className="flex flex-col items-center py-12 gap-3">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-full bg-red-600/20 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-full bg-red-600/20 animate-ping" />
-              <svg viewBox="0 0 24 24" className="w-8 h-8 fill-current text-red-500 relative">
-                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
+      {/* ── Fullscreen voice search overlay ── */}
+      {voiceOverlay && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+          {/* Close button */}
+          <div className="pt-[env(safe-area-inset-top)] px-4 pt-4">
+            <button
+              onClick={cancelVoice}
+              className="text-white/70 p-2"
+              aria-label="Cancel voice search"
+            >
+              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
               </svg>
+            </button>
+          </div>
+
+          {/* Transcript / status text */}
+          <div className="flex-1 flex flex-col justify-between px-8">
+            <div className="pt-16">
+              <p className="text-2xl text-white/40 min-h-[4rem]">
+                {transcribing
+                  ? (interimText || 'Processing...')
+                  : listening
+                    ? 'Speak now'
+                    : 'Speak now'}
+              </p>
+            </div>
+
+            {/* Mic button and hint */}
+            <div className="flex flex-col items-center pb-24">
+              {!transcribing && (
+                <>
+                  <p className="text-white/30 text-sm mb-2">Try saying</p>
+                  <p className="text-white/50 text-sm italic mb-8">"Play some music"</p>
+                </>
+              )}
+              {transcribing && (
+                <div className="mb-8 flex items-center gap-3">
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <p className="text-white/50 text-sm">Searching...</p>
+                </div>
+              )}
+
+              {/* Animated mic button */}
+              <div className="relative">
+                {/* Outer pulse ring — only while recording */}
+                {listening && (
+                  <div className="absolute inset-0 -m-4 rounded-full bg-white/10 animate-ping" style={{ animationDuration: '2s' }} />
+                )}
+                {/* Outer ring */}
+                <div className="w-28 h-28 rounded-full bg-[#333] flex items-center justify-center">
+                  {/* Middle ring */}
+                  <div className="w-20 h-20 rounded-full bg-[#555] flex items-center justify-center">
+                    {/* Red mic / stop button */}
+                    <button
+                      onClick={listening ? stopVoice : cancelVoice}
+                      disabled={transcribing}
+                      className={`w-16 h-16 rounded-full flex items-center justify-center transition-transform active:scale-95 ${transcribing ? 'bg-gray-600' : 'bg-red-600'}`}
+                    >
+                      {listening ? (
+                        /* Stop icon while recording */
+                        <svg viewBox="0 0 24 24" className="w-7 h-7 fill-white">
+                          <rect x="6" y="6" width="12" height="12" rx="2"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" className="w-7 h-7 fill-white">
+                          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <p className="text-yt-muted text-sm">Listening...</p>
         </div>
       )}
 
@@ -275,7 +457,7 @@ export default function Search() {
         )}
 
         {/* Suggestion / history area */}
-        {showSuggestionArea && !listening && (
+        {showSuggestionArea && !voiceOverlay && (
           <div className="px-2 pt-2">
             {/* Filtered history items */}
             {filteredHistory.map(q => (

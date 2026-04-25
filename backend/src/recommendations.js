@@ -111,17 +111,21 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
 
     return {
       sql: `
-        WITH effective_interests AS (
+        WITH raw_interests AS (
           SELECT pi.tag,
             pi.weight * COALESCE(its.multiplier, 1.0)                AS scaled,
             COALESCE(its.hard_cap, NULL)                              AS hard_cap,
-            p.behavior_weight_ceiling                                 AS ceiling,
-            MAX(pi.weight * COALESCE(its.multiplier, 1.0)) OVER ()   AS max_scaled
+            p.behavior_weight_ceiling                                 AS ceiling
           FROM profile_interests pi
           JOIN profiles p ON p.id = pi.profile_id
           LEFT JOIN interest_tag_settings its
             ON its.profile_id = pi.profile_id AND its.tag = pi.tag
           WHERE pi.profile_id = ? AND pi.source = 'behavior'
+        ),
+        effective_interests AS (
+          SELECT tag, scaled, hard_cap, ceiling,
+            (SELECT MAX(scaled) FROM raw_interests WHERE hard_cap IS NULL) AS max_scaled
+          FROM raw_interests
         ),
         eff_weights AS (
           SELECT tag,

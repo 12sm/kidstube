@@ -200,24 +200,41 @@ function parseTopicCategories(topicCategories) {
     .filter(Boolean);
 }
 
-async function searchVideos(query, whitelistedChannelIds, maxResults = 20) {
+async function searchVideos(query, { channelIds, maxResults = 20, open = false } = {}) {
   if (!process.env.YOUTUBE_API_KEY || !query) return [];
 
   const yt = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
-  const whitelistSet = new Set(whitelistedChannelIds);
+  const whitelistSet = channelIds ? new Set(channelIds) : null;
 
   try {
     const res = await yt.search.list({
       part: 'snippet',
       q: query,
       type: 'video',
-      maxResults: 50, // fetch more so whitelist filter has material to work with
+      maxResults: 50,
       safeSearch: 'strict',
       videoEmbeddable: 'true',
     });
 
-    return (res.data.items || [])
-      .filter(item => whitelistSet.has(item.snippet.channelId))
+    const items = res.data.items || [];
+
+    if (open) {
+      // Open search: return all results, no channel filter
+      return items.slice(0, maxResults).map(item => ({
+        video_id:         item.id.videoId,
+        title:            item.snippet.title,
+        channel_id:       item.snippet.channelId,
+        channel_name:     item.snippet.channelTitle,
+        thumbnail_url:    item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || null,
+        description:      item.snippet.description || null,
+        published_at:     item.snippet.publishedAt || null,
+        duration_seconds: null,
+      }));
+    }
+
+    // Legacy: filter to whitelisted channels only
+    return items
+      .filter(item => whitelistSet && whitelistSet.has(item.snippet.channelId))
       .slice(0, maxResults)
       .map(item => ({
         video_id:         item.id.videoId,
@@ -227,7 +244,7 @@ async function searchVideos(query, whitelistedChannelIds, maxResults = 20) {
         thumbnail_url:    item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || null,
         description:      item.snippet.description || null,
         published_at:     item.snippet.publishedAt || null,
-        duration_seconds: null, // not available from search.list
+        duration_seconds: null,
       }));
   } catch (err) {
     console.error('[YouTube] searchVideos failed:', err.message);

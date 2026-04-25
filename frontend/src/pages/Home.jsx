@@ -149,6 +149,7 @@ export default function Home() {
   // doesn't swallow the touch before we can call preventDefault()
   useEffect(() => {
     const onStart = (e) => {
+      if (e.target.closest('[data-mini-player]')) return;
       if (window.scrollY === 0 && !refreshingRef.current) {
         pullStartY.current = e.touches[0].clientY;
         isPulling.current  = true;
@@ -255,21 +256,14 @@ export default function Home() {
       <div className="pt-2 pb-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 md:gap-x-4 lg:gap-4 md:px-4 md:pt-2">
           {initialLoad && Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={`sk-${i}`} />)}
-          {!initialLoad && displayVideos.map((video, i) => (
+          {!initialLoad && displayVideos.map((video) => (
             <VideoCard
-              key={`${video.video_id}-${i}`}
+              key={video.video_id}
               video={video}
               watchProgress={watchHistoryMap[video.video_id] || null}
               onRemoved={(videoId) => setVideos(prev => prev.filter(v => v.video_id !== videoId))}
             />
           ))}
-          {/* Pad the last row so appending new batches never shifts existing items */}
-          {!initialLoad && displayVideos.length % 3 !== 0 && Array.from({ length: 3 - (displayVideos.length % 3) }).map((_, i) => (
-            <div key={`spacer-${i}`} className="hidden lg:block" aria-hidden="true" />
-          ))}
-          {!initialLoad && displayVideos.length % 2 !== 0 && (
-            <div key="spacer-md" className="hidden md:block lg:hidden" aria-hidden="true" />
-          )}
         </div>
 
         <div ref={loaderRef} className="py-6 text-center text-yt-muted text-sm">
