@@ -30,11 +30,11 @@ end sub
 
 sub updateProfileHighlight()
     if m.selectedProfile = 0
-        m.child1Focus.color = "0xFFFFFF33"
+        m.child1Focus.color = "0xFFFFFF55"
         m.child2Focus.color = "0x00000000"
     else
         m.child1Focus.color = "0x00000000"
-        m.child2Focus.color = "0xFFFFFF33"
+        m.child2Focus.color = "0xFFFFFF55"
     end if
 end sub
 

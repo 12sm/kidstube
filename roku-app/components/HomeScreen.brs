@@ -29,7 +29,8 @@ sub onHistoryLoaded()
         for each item in parsed.history
             ' Continue watching = 5-95% progress
             if item.duration_seconds <> invalid and item.duration_seconds > 0
-                pct = item.progress_seconds / item.duration_seconds
+                ' Force float division to avoid integer truncation to 0
+                pct = (item.progress_seconds * 1.0) / (item.duration_seconds * 1.0)
                 if pct > 0.05 and pct < 0.95
                     item.progress_pct = pct
                     m.historyData.push(item)

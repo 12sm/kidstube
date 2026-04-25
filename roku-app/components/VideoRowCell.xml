@@ -31,9 +31,9 @@
                 <Rectangle
                     id="progressBar"
                     width="350"
-                    height="4"
+                    height="6"
                     color="0xFF0000FF"
-                    translation="[0, 192]"
+                    translation="[0, 190]"
                     scale="[0, 1]"
                     visible="false" />
             </Group>
