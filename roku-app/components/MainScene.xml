@@ -12,7 +12,7 @@
                    font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
             <Group id="profileCards" translation="[0, 280]">
                 <Group id="child1Card" translation="[370, 0]">
-                    <Rectangle id="child1Bg" width="160" height="160" color="0x5C6BC0FF" />
+                    <Rectangle id="child1Bg" width="160" height="160" color="0x4CAF50FF" />
                     <Label text="W" width="160" height="160"
                            horizAlign="center" vertAlign="center"
                            font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
@@ -22,7 +22,7 @@
                            font="font:MediumBoldSystemFont" color="0xFFFFFFFF" />
                 </Group>
                 <Group id="child2Card" translation="[720, 0]">
-                    <Rectangle id="child2Bg" width="160" height="160" color="0xEF5350FF" />
+                    <Rectangle id="child2Bg" width="160" height="160" color="0xFF9800FF" />
                     <Label text="E" width="160" height="160"
                            horizAlign="center" vertAlign="center"
                            font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />

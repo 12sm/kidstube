@@ -9,8 +9,8 @@
             <Group id="thumbnailContainer">
                 <Poster
                     id="thumbnail"
-                    width="350"
-                    height="196"
+                    width="320"
+                    height="180"
                     loadDisplayMode="scaleToZoom"
                     failedBitmapUri=""
                     loadingBitmapOpacity="0.3" />
@@ -18,7 +18,7 @@
                     id="durationRect"
                     height="24"
                     color="0x000000CC"
-                    translation="[280, 166]"
+                    translation="[250, 150]"
                     visible="false">
                     <Label
                         id="durationLabel"
@@ -30,23 +30,23 @@
                 </Rectangle>
                 <Rectangle
                     id="progressBar"
-                    width="350"
+                    width="320"
                     height="6"
                     color="0xFF0000FF"
-                    translation="[0, 190]"
+                    translation="[0, 174]"
                     scale="[0, 1]"
                     visible="false" />
             </Group>
             <Label
                 id="titleLabel"
-                width="350"
+                width="320"
                 font="font:SmallestBoldSystemFont"
                 maxLines="2"
                 wrap="true"
                 color="0xFFFFFFFF" />
             <Label
                 id="channelLabel"
-                width="350"
+                width="320"
                 height="22"
                 font="font:SmallestSystemFont"
                 color="0xAAAAAAFF" />

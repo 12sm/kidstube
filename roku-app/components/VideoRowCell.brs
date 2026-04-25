@@ -25,7 +25,7 @@ sub onContentSet()
         ' Size the badge rectangle to fit the text
         textWidth = m.durationLabel.boundingRect().width + 16
         m.durationRect.width = textWidth
-        m.durationRect.translation = [350 - textWidth - 6, 166]
+        m.durationRect.translation = [320 - textWidth - 6, 150]
         m.durationRect.visible = true
     else
         m.durationRect.visible = false

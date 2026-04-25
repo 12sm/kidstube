@@ -25,7 +25,7 @@ sub onProfileIdSet()
 
     ' Fetch recommended feed
     m.feedTask = createObject("roSGNode", "FetchTask")
-    m.feedTask.url = m.global.backendUrl + "/api/feed/" + profileId.toStr() + "?limit=40"
+    m.feedTask.url = m.global.backendUrl + "/api/feed/" + profileId.toStr() + "?limit=30"
     m.feedTask.observeFieldScoped("response", "onFeedLoaded")
     m.feedTask.control = "RUN"
 end sub
@@ -81,20 +81,34 @@ sub tryBuildRows()
         content.appendChild(cwRow)
     end if
 
-    ' Row 2: Recommended
-    recRow = createObject("roSGNode", "ContentNode")
-    recRow.title = "Recommended"
-    for each item in m.feedData
-        child = createObject("roSGNode", "ContentNode")
-        child.title = item.title
-        child.HDPosterUrl = item.thumbnail_url
-        child.description = item.channel_name
-        dur = 0
-        if item.duration_seconds <> invalid then dur = item.duration_seconds
-        child.addFields({ video_id: item.video_id, duration_seconds: dur, progress_pct: 0 })
-        recRow.appendChild(child)
+    ' Build multiple feed rows from the recommended data
+    ' Split into chunks for a YouTube-like multi-row layout
+    feedCount = m.feedData.count()
+    rowSize = 10
+    rowTitles = ["Recommended", "More to Watch", "Explore"]
+    rowIdx = 0
+    for i = 0 to feedCount - 1 step rowSize
+        if rowIdx >= rowTitles.count() then exit for
+        feedRow = createObject("roSGNode", "ContentNode")
+        feedRow.title = rowTitles[rowIdx]
+        endIdx = i + rowSize - 1
+        if endIdx >= feedCount then endIdx = feedCount - 1
+        for j = i to endIdx
+            item = m.feedData[j]
+            child = createObject("roSGNode", "ContentNode")
+            child.title = item.title
+            child.HDPosterUrl = item.thumbnail_url
+            child.description = item.channel_name
+            dur = 0
+            if item.duration_seconds <> invalid then dur = item.duration_seconds
+            child.addFields({ video_id: item.video_id, duration_seconds: dur, progress_pct: 0 })
+            feedRow.appendChild(child)
+        end for
+        if feedRow.getChildCount() > 0
+            content.appendChild(feedRow)
+        end if
+        rowIdx = rowIdx + 1
     end for
-    content.appendChild(recRow)
 
     m.rowList.content = content
     m.rowList.setFocus(true)
