@@ -7,6 +7,8 @@ sub runFetch()
     http.setUrl(m.top.url)
     http.setCertificatesFile("common:/certs/ca-bundle.crt")
     http.InitClientCertificates()
+    http.setConnectTimeout(5000)
+    http.setTransferTimeout(15000)
     if m.top.method = "POST" then
         http.setRequest("POST")
         http.addHeader("Content-Type", "application/json")
