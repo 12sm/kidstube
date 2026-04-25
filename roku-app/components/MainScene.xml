@@ -12,15 +12,15 @@
                    font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
             <Group id="profileCards" translation="[0, 280]">
                 <Group id="child1Card" translation="[340, 0]">
-                    <Rectangle id="child1Bg" width="200" height="200" color="0x282828FF" cornerRadius="8" />
+                    <Rectangle id="child1Bg" width="200" height="200" color="0x282828FF" />
                     <Poster id="child1Avatar" width="200" height="200" loadDisplayMode="scaleToZoom" />
-                    <Rectangle id="child1Focus" width="200" height="200" color="0x00000000" cornerRadius="8" />
+                    <Rectangle id="child1Focus" width="200" height="200" color="0x00000000" />
                     <Label text="Child1" width="200" horizAlign="center"
                            translation="[0, 210]"
                            font="font:MediumBoldSystemFont" color="0xFFFFFFFF" />
                 </Group>
                 <Group id="child2Card" translation="[740, 0]">
-                    <Rectangle id="child2Bg" width="200" height="200" color="0x282828FF" cornerRadius="8" />
+                    <Rectangle id="child2Bg" width="200" height="200" color="0x282828FF" />
                     <Poster id="child2Avatar" width="200" height="200" loadDisplayMode="scaleToZoom" />
                     <Rectangle id="child2Focus" width="200" height="200" color="0x00000000" cornerRadius="8" />
                     <Label text="Child2" width="200" horizAlign="center"
@@ -37,6 +37,15 @@
                 <Group id="homeWrapper" />
             </Group>
             <Group id="videoContainer" />
+
+            <!-- Content shift animation when NavBar expands -->
+            <Animation id="contentShiftAnim" duration="0.15" easeFunction="outCubic">
+                <Vector2DFieldInterpolator
+                    id="contentShiftInterp"
+                    key="[0.0, 1.0]"
+                    keyValue="[[80, 0], [200, 0]]"
+                    fieldToInterp="contentArea.translation" />
+            </Animation>
         </Group>
     </children>
 </component>

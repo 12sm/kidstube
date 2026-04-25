@@ -26,9 +26,10 @@
             showRowLabel="[true]"
             rowLabelFont="font:SmallBoldSystemFont"
             rowLabelColor="0xFFFFFFFF"
-            rowFocusAnimationStyle="floatingFocus"
-            vertFocusAnimationStyle="floatingFocus"
+            rowFocusAnimationStyle="fixedFocusWrap"
+            vertFocusAnimationStyle="fixedFocus"
             drawFocusFeedback="true"
+            focusBitmapBlendColor="0xFFFFFFFF"
         />
 
         <Group id="loadingGroup" translation="[540, 320]">

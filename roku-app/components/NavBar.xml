@@ -17,7 +17,7 @@
         <!-- Expanded sidebar (shown on focus) -->
         <Rectangle
             id="expandedBg"
-            width="160"
+            width="180"
             height="720"
             color="0x212121FF"
             opacity="0.0"
@@ -30,7 +30,7 @@
             height="26"
             color="0xFF0000FF"
             translation="[22, 40]"
-            cornerRadius="4" />
+            />
         <Label
             id="logoPlay"
             text="▶"
@@ -46,8 +46,8 @@
         <Label
             id="brandLabel"
             text="YouTube"
-            translation="[22, 78]"
-            font="font:SmallBoldSystemFont"
+            translation="[64, 42]"
+            font="font:SmallestBoldSystemFont"
             color="0xFFFFFFFF"
             opacity="0.0" />
 

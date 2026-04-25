@@ -13,8 +13,19 @@ sub init()
     m.contentArea = m.top.findNode("contentArea")
     m.homeWrapper = m.top.findNode("homeWrapper")
     m.videoContainer = m.top.findNode("videoContainer")
+    m.contentShiftAnim = m.top.findNode("contentShiftAnim")
+    m.contentShiftInterp = m.top.findNode("contentShiftInterp")
+
+    ' Observe NavBar expand/collapse to shift content
+    m.navBar.observeFieldScoped("isExpanded", "onNavBarExpand")
 
     updateProfileHighlight()
+end sub
+
+sub onNavBarExpand()
+    m.contentShiftAnim.control = "stop"
+    m.contentShiftInterp.reverse = not m.navBar.isExpanded
+    m.contentShiftAnim.control = "start"
 end sub
 
 sub updateProfileHighlight()
