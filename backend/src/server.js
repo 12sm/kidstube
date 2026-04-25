@@ -235,11 +235,26 @@ app.get('/api/video/:videoId', (req, res) => {
 });
 
 // Get a stream URL for a video (used by Roku channel)
-// Uses local Invidious instance to resolve YouTube stream URLs with PO token.
-// Invidious handles signature deciphering + BotGuard attestation via companion.
+// Innertube for format metadata (init/index ranges, codecs), Invidious for unthrottled CDN URLs.
+// Invidious companion handles BotGuard attestation + PO token generation.
 const INVIDIOUS_URL = 'http://invidious:3000';
 const streamCache = new Map();
 const STREAM_CACHE_TTL_MS = 25 * 60 * 1000;
+
+// Resolve a YouTube CDN URL via Invidious (follows companion redirect chain)
+async function resolveInvidiousUrl(videoId, itag) {
+  const invUrl = `${INVIDIOUS_URL}/latest_version?id=${videoId}&itag=${itag}`;
+  const resp = await fetch(invUrl, { redirect: 'manual' });
+  const location = resp.headers.get('location');
+  if (location && location.includes('googlevideo.com')) return location;
+  if (location) {
+    const fullUrl = location.startsWith('/') ? `${INVIDIOUS_URL}${location}` : location;
+    const resp2 = await fetch(fullUrl, { redirect: 'manual' });
+    const location2 = resp2.headers.get('location');
+    if (location2 && location2.includes('googlevideo.com')) return location2;
+  }
+  return null;
+}
 
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
@@ -248,99 +263,131 @@ app.get('/api/stream/:videoId', async (req, res) => {
 
   const cached = streamCache.get(videoId);
   if (cached && cached.expiresAt > Date.now()) {
-    return res.json({ url: cached.url, type: cached.type, cached: true });
+    const manifestUrl = `http://${req.headers.host}/api/manifest/${videoId}`;
+    return res.json({ url: manifestUrl, type: 'dash', cached: true });
   }
 
   try {
     const t0 = Date.now();
-    // Get muxed mp4 URL via Invidious (itag 18 = 360p, itag 22 = 720p)
-    // Invidious /latest_version redirects to YouTube CDN with PO token + ratebypass
-    // We resolve the redirect and return the final CDN URL to the Roku
-    let streamUrl = null;
-    let streamType = 'mp4';
 
-    for (const itag of [22, 18]) { // Try 720p first, fall back to 360p
-      try {
-        const invUrl = `${INVIDIOUS_URL}/latest_version?id=${videoId}&itag=${itag}`;
-        const resp = await fetch(invUrl, { redirect: 'manual' });
-        const location = resp.headers.get('location');
-        if (location && location.includes('googlevideo.com')) {
-          streamUrl = location;
-          console.log(`[stream] Invidious itag=${itag} resolved directly`);
-          break;
-        }
-        // Companion redirect — resolve relative URL and follow one more hop
-        if (location) {
-          const fullUrl = location.startsWith('/') ? `${INVIDIOUS_URL}${location}` : location;
-          const resp2 = await fetch(fullUrl, { redirect: 'manual' });
-          const location2 = resp2.headers.get('location');
-          if (location2 && location2.includes('googlevideo.com')) {
-            streamUrl = location2;
-            console.log(`[stream] Invidious itag=${itag} resolved via companion`);
-            break;
-          }
-        }
-      } catch (err) {
-        console.warn(`[stream] Invidious itag=${itag} failed:`, err.message.slice(0, 80));
-      }
+    // Innertube for metadata + Invidious for URLs — in parallel
+    const [innertubeResult, videoUrl, audioUrl] = await Promise.all([
+      innertube.getStreamInfo(videoId),
+      resolveInvidiousUrl(videoId, 136).catch(() => null),  // 720p avc1
+      resolveInvidiousUrl(videoId, 140).catch(() => null),  // best m4a audio
+    ]);
+
+    const { formats, durationMs } = innertubeResult;
+    const videoMeta = formats.find(f => f.itag === 136);
+    const audioMeta = formats.find(f => f.itag === 140);
+
+    if (!videoUrl || !audioUrl || !videoMeta || !audioMeta) {
+      // Fallback to 360p muxed mp4
+      const muxedUrl = await resolveInvidiousUrl(videoId, 18);
+      if (!muxedUrl) throw new Error('No playable stream found');
+      console.log(`[stream] OK ${videoId} fallback=360p in ${Date.now() - t0}ms`);
+      streamCache.set(videoId, { muxedUrl, expiresAt: Date.now() + STREAM_CACHE_TTL_MS });
+      const proxyUrl = `http://${req.headers.host}/api/proxy/${videoId}/muxed`;
+      return res.json({ url: proxyUrl, type: 'mp4', cached: false });
     }
 
-    if (!streamUrl) throw new Error('No playable stream found via Invidious');
+    console.log(`[stream] OK ${videoId} dash=720p in ${Date.now() - t0}ms`);
+    streamCache.set(videoId, {
+      videoUrl, audioUrl, videoMeta, audioMeta, durationMs,
+      expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
+    });
 
-    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms`);
-    streamCache.set(videoId, { url: streamUrl, type: streamType, expiresAt: Date.now() + STREAM_CACHE_TTL_MS });
-    if (streamCache.size > 200) {
-      const now = Date.now();
-      for (const [key, val] of streamCache) { if (val.expiresAt < now) streamCache.delete(key); }
-    }
-    // Return a proxy URL through our backend — Roku can't hit YouTube CDN directly
-    // (IP mismatch: server resolved the URL, Roku has different public IP)
-    const proxyUrl = `http://${req.headers.host}/api/proxy/${videoId}`;
-    res.json({ url: proxyUrl, type: streamType, cached: false });
+    const manifestUrl = `http://${req.headers.host}/api/manifest/${videoId}`;
+    res.json({ url: manifestUrl, type: 'dash', cached: false });
   } catch (err) {
     console.error(`[stream] Failed for ${videoId}:`, err.message);
     res.status(502).json({ error: 'Stream unavailable', detail: err.message });
   }
 });
 
-// Proxy video stream — pipes YouTube CDN bytes through our server to the Roku.
-// The CDN URL has ratebypass=yes + PO token from Invidious, so no throttling.
+// Proxy video/audio streams — pipes YouTube CDN bytes through our server to the Roku.
+// CDN URLs have ratebypass=yes + PO token from Invidious, so no throttling.
 const { Readable } = require('stream');
-app.get('/api/proxy/:videoId', async (req, res) => {
-  const { videoId } = req.params;
-  console.log(`[proxy] ${videoId} range=${req.headers.range || 'none'}`);
+
+async function proxyStream(url, req, res) {
+  const headers = {};
+  if (req.headers.range) headers.Range = req.headers.range;
+  const upstream = await fetch(url, { headers, redirect: 'follow' });
+  res.status(upstream.status);
+  for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+    const v = upstream.headers.get(h);
+    if (v) res.set(h, v);
+  }
+  Readable.fromWeb(upstream.body).pipe(res);
+}
+
+// DASH proxy — video or audio by track type
+app.get('/api/proxy/:videoId/:track', async (req, res) => {
+  const { videoId, track } = req.params;
   const cached = streamCache.get(videoId);
   if (!cached || cached.expiresAt < Date.now()) {
-    return res.status(404).json({ error: 'Stream not cached — call /api/stream first' });
+    return res.status(404).end();
   }
   try {
-    const headers = {};
-    if (req.headers.range) headers.Range = req.headers.range;
-
-    const upstream = await fetch(cached.url, { headers, redirect: 'follow' });
-    console.log(`[proxy] ${videoId} upstream=${upstream.status} content-length=${upstream.headers.get('content-length')}`);
-
-    res.status(upstream.status);
-    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
-      const v = upstream.headers.get(h);
-      if (v) res.set(h, v);
-    }
-    Readable.fromWeb(upstream.body).pipe(res);
+    let url;
+    if (track === 'video') url = cached.videoUrl;
+    else if (track === 'audio') url = cached.audioUrl;
+    else if (track === 'muxed') url = cached.muxedUrl;
+    if (!url) return res.status(404).end();
+    await proxyStream(url, req, res);
   } catch (err) {
-    console.error(`[proxy] Failed for ${videoId}:`, err.message);
+    console.error(`[proxy] Failed ${videoId}/${track}:`, err.message);
     res.status(502).end();
   }
 });
 
-// Serve the DASH manifest for a video (Roku media player fetches this directly)
+// Serve DASH manifest — proxy URLs so Roku fetches through our backend
 app.get('/api/manifest/:videoId', (req, res) => {
   const { videoId } = req.params;
   const cached = streamCache.get(videoId);
   if (!cached || cached.expiresAt < Date.now()) {
     return res.status(404).json({ error: 'Stream info not cached — call /api/stream first' });
   }
+  if (!cached.videoMeta || !cached.audioMeta) {
+    return res.status(404).json({ error: 'No DASH metadata — use muxed fallback' });
+  }
   try {
-    const mpd = dash.buildManifest(cached.formats, cached.durationMs);
+    const v = cached.videoMeta;
+    const a = cached.audioMeta;
+    const dur = (cached.durationMs / 1000).toFixed(3);
+    const baseUrl = `http://${req.headers.host}/api/proxy/${videoId}`;
+    const vCodec = (v.mime_type.match(/codecs="([^"]+)"/) || [])[1] || 'avc1.4d401f';
+    const aCodec = (a.mime_type.match(/codecs="([^"]+)"/) || [])[1] || 'mp4a.40.2';
+
+    const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const mpd = `<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011"
+     profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"
+     type="static"
+     mediaPresentationDuration="PT${dur}S"
+     minBufferTime="PT1.5S">
+  <Period duration="PT${dur}S">
+    <AdaptationSet id="1" contentType="video" segmentAlignment="true">
+      <Representation id="v0" mimeType="video/mp4" codecs="${esc(vCodec)}"
+                      bandwidth="${v.bitrate}" width="${v.width}" height="${v.height}" frameRate="${v.fps || 30}">
+        <BaseURL>${esc(baseUrl)}/video</BaseURL>
+        <SegmentBase indexRange="${v.index_range.start}-${v.index_range.end}">
+          <Initialization range="${v.init_range.start}-${v.init_range.end}"/>
+        </SegmentBase>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="2" contentType="audio" segmentAlignment="true">
+      <Representation id="a0" mimeType="audio/mp4" codecs="${esc(aCodec)}"
+                      bandwidth="${a.bitrate}" audioSamplingRate="${a.audio_sample_rate || 44100}">
+        <BaseURL>${esc(baseUrl)}/audio</BaseURL>
+        <SegmentBase indexRange="${a.index_range.start}-${a.index_range.end}">
+          <Initialization range="${a.init_range.start}-${a.init_range.end}"/>
+        </SegmentBase>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
     res.set('Content-Type', 'application/dash+xml');
     res.send(mpd);
   } catch (err) {
