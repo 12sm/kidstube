@@ -39,12 +39,14 @@ sub onStreamUrlLoaded()
     parsed = ParseJson(m.streamTask.response)
     if parsed = invalid then
         print "[VideoPlayer] stream response parse failed"
+        m.loadingBg.visible = false
         m.loadingLabel.visible = false
         showErrorDialog("This video is not available right now.")
         return
     end if
     if parsed.url = invalid then
         print "[VideoPlayer] stream response missing url"
+        m.loadingBg.visible = false
         m.loadingLabel.visible = false
         showErrorDialog("This video is not available right now.")
         return
@@ -76,6 +78,7 @@ sub onPlayerStateChange()
     if state = "error" then
         m.progressTimer.control = "stop"
         print "[VideoPlayer] error=" m.top.errorStr
+        m.loadingBg.visible = false
         m.loadingLabel.visible = false
         showErrorDialog("Could not play this video. Please try again.")
     end if
