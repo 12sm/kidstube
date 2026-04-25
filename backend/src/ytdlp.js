@@ -165,4 +165,4 @@ async function getStreamUrl(videoId) {
   throw new Error(`No playable stream found for ${videoId}`);
 }
 
-module.exports = { fetchVideoData, getStreamUrl };
+module.exports = { fetchVideoData, getStreamUrl, runYtDlp };

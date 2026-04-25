@@ -234,29 +234,109 @@ app.get('/api/video/:videoId', (req, res) => {
   res.json({ video });
 });
 
-// Get a DASH manifest URL for a video (used by Roku channel)
+// Get a stream URL for a video (used by Roku channel)
+// Uses local Invidious instance to resolve YouTube stream URLs with PO token.
+// Invidious handles signature deciphering + BotGuard attestation via companion.
+const INVIDIOUS_URL = 'http://invidious:3000';
+const streamCache = new Map();
+const STREAM_CACHE_TTL_MS = 25 * 60 * 1000;
+
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   console.log(`[stream] Request for ${videoId}`);
   if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
-  const wasCached = innertube.getCached(videoId) !== null;
+
+  const cached = streamCache.get(videoId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.json({ url: cached.url, type: cached.type, cached: true });
+  }
+
   try {
     const t0 = Date.now();
-    await innertube.getStreamInfo(videoId);
-    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms cached=${wasCached}`);
-    const manifestUrl = `${req.protocol}://${req.headers.host}/api/manifest/${videoId}`;
-    res.json({ url: manifestUrl, type: 'dash', cached: wasCached });
+    // Get muxed mp4 URL via Invidious (itag 18 = 360p, itag 22 = 720p)
+    // Invidious /latest_version redirects to YouTube CDN with PO token + ratebypass
+    // We resolve the redirect and return the final CDN URL to the Roku
+    let streamUrl = null;
+    let streamType = 'mp4';
+
+    for (const itag of [22, 18]) { // Try 720p first, fall back to 360p
+      try {
+        const invUrl = `${INVIDIOUS_URL}/latest_version?id=${videoId}&itag=${itag}`;
+        const resp = await fetch(invUrl, { redirect: 'manual' });
+        const location = resp.headers.get('location');
+        if (location && location.includes('googlevideo.com')) {
+          streamUrl = location;
+          console.log(`[stream] Invidious itag=${itag} resolved directly`);
+          break;
+        }
+        // Companion redirect — resolve relative URL and follow one more hop
+        if (location) {
+          const fullUrl = location.startsWith('/') ? `${INVIDIOUS_URL}${location}` : location;
+          const resp2 = await fetch(fullUrl, { redirect: 'manual' });
+          const location2 = resp2.headers.get('location');
+          if (location2 && location2.includes('googlevideo.com')) {
+            streamUrl = location2;
+            console.log(`[stream] Invidious itag=${itag} resolved via companion`);
+            break;
+          }
+        }
+      } catch (err) {
+        console.warn(`[stream] Invidious itag=${itag} failed:`, err.message.slice(0, 80));
+      }
+    }
+
+    if (!streamUrl) throw new Error('No playable stream found via Invidious');
+
+    console.log(`[stream] OK ${videoId} in ${Date.now() - t0}ms`);
+    streamCache.set(videoId, { url: streamUrl, type: streamType, expiresAt: Date.now() + STREAM_CACHE_TTL_MS });
+    if (streamCache.size > 200) {
+      const now = Date.now();
+      for (const [key, val] of streamCache) { if (val.expiresAt < now) streamCache.delete(key); }
+    }
+    // Return a proxy URL through our backend — Roku can't hit YouTube CDN directly
+    // (IP mismatch: server resolved the URL, Roku has different public IP)
+    const proxyUrl = `http://${req.headers.host}/api/proxy/${videoId}`;
+    res.json({ url: proxyUrl, type: streamType, cached: false });
   } catch (err) {
     console.error(`[stream] Failed for ${videoId}:`, err.message);
     res.status(502).json({ error: 'Stream unavailable', detail: err.message });
   }
 });
 
+// Proxy video stream — pipes YouTube CDN bytes through our server to the Roku.
+// The CDN URL has ratebypass=yes + PO token from Invidious, so no throttling.
+const { Readable } = require('stream');
+app.get('/api/proxy/:videoId', async (req, res) => {
+  const { videoId } = req.params;
+  console.log(`[proxy] ${videoId} range=${req.headers.range || 'none'}`);
+  const cached = streamCache.get(videoId);
+  if (!cached || cached.expiresAt < Date.now()) {
+    return res.status(404).json({ error: 'Stream not cached — call /api/stream first' });
+  }
+  try {
+    const headers = {};
+    if (req.headers.range) headers.Range = req.headers.range;
+
+    const upstream = await fetch(cached.url, { headers, redirect: 'follow' });
+    console.log(`[proxy] ${videoId} upstream=${upstream.status} content-length=${upstream.headers.get('content-length')}`);
+
+    res.status(upstream.status);
+    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      const v = upstream.headers.get(h);
+      if (v) res.set(h, v);
+    }
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (err) {
+    console.error(`[proxy] Failed for ${videoId}:`, err.message);
+    res.status(502).end();
+  }
+});
+
 // Serve the DASH manifest for a video (Roku media player fetches this directly)
 app.get('/api/manifest/:videoId', (req, res) => {
   const { videoId } = req.params;
-  const cached = innertube.getCached(videoId);
-  if (!cached) {
+  const cached = streamCache.get(videoId);
+  if (!cached || cached.expiresAt < Date.now()) {
     return res.status(404).json({ error: 'Stream info not cached — call /api/stream first' });
   }
   try {

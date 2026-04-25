@@ -7,8 +7,11 @@ sub runFetch()
     http.setUrl(m.top.url)
     http.setCertificatesFile("common:/certs/ca-bundle.crt")
     http.InitClientCertificates()
-    http.setConnectTimeout(5000)
-    http.setTransferTimeout(15000)
+    ' Note: setConnectTimeout/setTransferTimeout not available on all Roku firmware
+    ' Using SetMinimumTransferRate as a fallback timeout mechanism
+    ' If transfer drops below 100 bytes/sec for 15 seconds, abort
+    http.EnableFreshConnection(true)
+    http.SetMinimumTransferRate(100, 15)
     if m.top.method = "POST" then
         http.setRequest("POST")
         http.addHeader("Content-Type", "application/json")

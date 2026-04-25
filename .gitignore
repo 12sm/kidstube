@@ -30,3 +30,5 @@ screenshots/playwright/
 
 # Git worktrees
 .worktrees/
+invidious-repo/
+.playwright-mcp/

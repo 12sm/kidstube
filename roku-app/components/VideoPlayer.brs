@@ -44,8 +44,10 @@ sub onStreamUrlLoaded()
         showErrorDialog("This video is not available right now.")
         return
     end if
-    if parsed.url = invalid then
-        print "[VideoPlayer] stream response missing url"
+    if parsed.url = invalid or parsed.url = "" then
+        errMsg = "Stream unavailable"
+        if parsed.error <> invalid then errMsg = parsed.error
+        print "[VideoPlayer] stream error: " errMsg
         m.loadingBg.visible = false
         m.loadingLabel.visible = false
         showErrorDialog("This video is not available right now.")
@@ -90,7 +92,7 @@ sub onPlayerStateChange()
 end sub
 
 sub showErrorDialog(message as String)
-    dialog = createObject("roSGNode", "SimpleDialog")
+    dialog = createObject("roSGNode", "Dialog")
     dialog.title = "Video Unavailable"
     dialog.message = message
     dialog.buttons = ["OK"]
@@ -141,6 +143,15 @@ sub reportProgress()
     httpTask.body = FormatJson(reqBody)
     httpTask.control = "RUN"
 end sub
+
+function xmlEscape(s as string) as string
+    out = s
+    out = out.replace("&", "&amp;")
+    out = out.replace("""", "&quot;")
+    out = out.replace("<", "&lt;")
+    out = out.replace(">", "&gt;")
+    return out
+end function
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     keys = RemoteKeys()
