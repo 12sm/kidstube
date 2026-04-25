@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="VideoRowCell" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContentSet" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/VideoRowCell.brs" />
+    <children>
+        <LayoutGroup layoutDirection="vert" itemSpacings="[8, 4]">
+            <Group id="thumbnailContainer">
+                <Poster
+                    id="thumbnail"
+                    width="350"
+                    height="196"
+                    loadDisplayMode="scaleToZoom"
+                    failedBitmapUri=""
+                    loadingBitmapOpacity="0.3" />
+                <Rectangle
+                    id="durationRect"
+                    height="24"
+                    color="0x000000CC"
+                    translation="[280, 166]"
+                    visible="false">
+                    <Label
+                        id="durationLabel"
+                        height="24"
+                        font="font:SmallestSystemFont"
+                        horizAlign="center"
+                        vertAlign="center"
+                        translation="[6, 0]" />
+                </Rectangle>
+                <Rectangle
+                    id="progressBar"
+                    width="350"
+                    height="4"
+                    color="0xFF0000FF"
+                    translation="[0, 192]"
+                    scale="[0, 1]"
+                    visible="false" />
+            </Group>
+            <Label
+                id="titleLabel"
+                width="350"
+                font="font:SmallestBoldSystemFont"
+                maxLines="2"
+                wrap="true"
+                color="0xFFFFFFFF" />
+            <Label
+                id="channelLabel"
+                width="350"
+                height="22"
+                font="font:SmallestSystemFont"
+                color="0xAAAAAAFF" />
+        </LayoutGroup>
+    </children>
+</component>
