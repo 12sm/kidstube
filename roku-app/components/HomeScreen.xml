@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="HomeScreen" extends="Group">
+    <interface>
+        <field id="profileId" type="integer" onChange="onProfileIdSet" />
+        <field id="isDone" type="boolean" value="false" />
+        <field id="isPlaying" type="boolean" value="false" />
+        <field id="pendingVideoId" type="string" value="" />
+        <field id="pendingVideoTitle" type="string" value="" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/RemoteKeys.brs" />
+    <script type="text/brightscript" uri="pkg:/components/HomeScreen.brs" />
+    <children>
+        <Rectangle width="1280" height="720" color="0x0F0F0FFF" />
+
+        <RowList
+            id="rowList"
+            itemComponentName="VideoRowCell"
+            translation="[0, 20]"
+            numRows="2"
+            rowItemSize="[[350, 280]]"
+            rowItemSpacing="[[20, 0]]"
+            itemSize="[1280, 340]"
+            itemSpacing="[0, 30]"
+            rowLabelOffset="[[60, 10]]"
+            focusXOffset="[60]"
+            showRowLabel="[true]"
+            rowLabelFont="font:SmallBoldSystemFont"
+            rowLabelColor="0xFFFFFFFF"
+            rowFocusAnimationStyle="floatingFocus"
+            vertFocusAnimationStyle="floatingFocus"
+            drawFocusFeedback="true"
+        />
+
+        <Group id="loadingGroup" translation="[540, 320]">
+            <BusySpinner id="spinner" translation="[60, 0]" />
+            <Label id="loadingLabel" text="Loading..." translation="[0, 60]"
+                   width="200" horizAlign="center"
+                   font="font:SmallSystemFont" color="0xAAAAAAFF" />
+        </Group>
+    </children>
+</component>
