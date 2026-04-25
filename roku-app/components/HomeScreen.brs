@@ -3,6 +3,14 @@ sub init()
     m.loadingGroup = m.top.findNode("loadingGroup")
     m.lastSelectedIndex = 0
     m.rowList.observeFieldScoped("rowItemSelected", "onItemSelected")
+    ' Pass focus down to RowList when HomeScreen receives focus
+    m.top.observeFieldScoped("focusedChild", "onFocusChanged")
+end sub
+
+sub onFocusChanged()
+    if m.top.isInFocusChain() and not m.rowList.hasFocus()
+        m.rowList.setFocus(true)
+    end if
 end sub
 
 sub onProfileIdSet()
