@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="NavBar" extends="Group">
+    <interface>
+        <field id="isExpanded" type="boolean" value="false" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/RemoteKeys.brs" />
+    <script type="text/brightscript" uri="pkg:/components/NavBar.brs" />
+    <children>
+        <!-- Collapsed bar (always visible) -->
+        <Rectangle
+            id="background"
+            width="80"
+            height="720"
+            color="0x212121FF"
+            opacity="0.95" />
+
+        <!-- Expanded sidebar (shown on focus) -->
+        <Rectangle
+            id="expandedBg"
+            width="160"
+            height="720"
+            color="0x212121FF"
+            opacity="0.0"
+            translation="[80, 0]" />
+
+        <!-- YouTube-style red logo mark -->
+        <Rectangle
+            id="logoMark"
+            width="36"
+            height="26"
+            color="0xFF0000FF"
+            translation="[22, 40]"
+            cornerRadius="4" />
+        <Label
+            id="logoPlay"
+            text="▶"
+            width="36"
+            height="26"
+            horizAlign="center"
+            vertAlign="center"
+            translation="[22, 40]"
+            font="font:SmallestSystemFont"
+            color="0xFFFFFFFF" />
+
+        <!-- Brand text (visible when expanded) -->
+        <Label
+            id="brandLabel"
+            text="YouTube"
+            translation="[22, 78]"
+            font="font:SmallBoldSystemFont"
+            color="0xFFFFFFFF"
+            opacity="0.0" />
+
+        <!-- Home nav item -->
+        <Group id="homeItem" translation="[0, 140]">
+            <Rectangle
+                id="homeFocusRect"
+                width="80"
+                height="44"
+                color="0xFFFFFFFF"
+                opacity="0.0" />
+            <Label
+                id="homeIcon"
+                text="⌂"
+                width="80"
+                height="44"
+                horizAlign="center"
+                vertAlign="center"
+                font="font:MediumBoldSystemFont"
+                color="0xFFFFFFFF" />
+            <Label
+                id="homeLabel"
+                text="Home"
+                translation="[80, 0]"
+                height="44"
+                vertAlign="center"
+                font="font:SmallSystemFont"
+                color="0xFFFFFFFF"
+                opacity="0.0" />
+        </Group>
+
+        <!-- Expand/collapse animation -->
+        <Animation id="expandAnim" duration="0.15" easeFunction="outCubic">
+            <FloatFieldInterpolator
+                id="expandedBgFade"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 0.95]"
+                fieldToInterp="expandedBg.opacity" />
+            <FloatFieldInterpolator
+                id="brandFade"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]"
+                fieldToInterp="brandLabel.opacity" />
+            <FloatFieldInterpolator
+                id="homeLabelFade"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]"
+                fieldToInterp="homeLabel.opacity" />
+            <FloatFieldInterpolator
+                id="homeFocusFade"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 0.15]"
+                fieldToInterp="homeFocusRect.opacity" />
+        </Animation>
+    </children>
+</component>
