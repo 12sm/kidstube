@@ -70,6 +70,7 @@ Project moved from Mac local dev to Ubuntu dev machine. Repo is now in git.
 
 ## Roku Dev Device
 - [roku_device.md](roku_device.md) — IP, username, password for dev sideload uploads
+- [roku_streaming_architecture.md](roku_streaming_architecture.md) — Invidious proxy chain, what failed, quality status
 
 ## Claude Install — Ubuntu Dev Server
 - `claude` binary is at `/home/michael/.local/bin/claude` — not in PATH over non-interactive SSH sessions
