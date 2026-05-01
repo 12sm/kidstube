@@ -1,10 +1,20 @@
 # KidsTube
 
-A parent-controlled YouTube app for kids. Parents approve channels and configure filters — the app
-handles everything else: nightly video ingestion, multi-pass content filtering (keywords + AI), 
-personalized feeds based on watch behavior, and a YouTube-style UI that kids already know how to use.
+A parent-controlled YouTube app for kids, built by a tired parent who got mass-served
+Skibidi Toilet at 7 AM on a Saturday.
 
-No ads. No algorithm rabbit holes. No comments. Just the videos you've approved.
+YouTube Kids is a slot machine with a parental advisory sticker on it. YouTube proper
+is a fire hose pointed at your child's face. Neither one lets you say "show my kid
+videos from these 50 channels and nothing else." So here we are — self-hosting a
+Docker stack and writing cron jobs at midnight because a trillion-dollar company
+couldn't be bothered to add a channel whitelist.
+
+Parents approve channels and configure filters. The app handles everything else:
+nightly video ingestion, multi-pass content filtering (keywords + AI), personalized
+feeds based on watch behavior, and a YouTube-style UI that kids already know how to use.
+
+No ads. No algorithm rabbit holes. No comments. No autoplay pipeline to [weird
+Elsa videos](https://en.wikipedia.org/wiki/Elsagate). Just the videos you've approved.
 
 ## What it does
 
@@ -231,6 +241,25 @@ docker compose up -d --build
 | `CRON_SCHEDULE` | No | Nightly job schedule in cron syntax (default: `0 2 * * *`) |
 | `LLM_PROVIDER` | No | `anthropic` (default) or `ollama` for local LLM |
 | `OLLAMA_URL` | No | Ollama endpoint if using `LLM_PROVIDER=ollama` |
+
+---
+
+## Disclaimer
+
+This project exists because YouTube won't give parents the one feature they actually
+need: a whitelist. It is intended for **personal, home use only** — a parent running
+it on their own network for their own kids, because Google left us no other option
+besides handing a toddler an unfiltered content firehose or banning screens entirely.
+
+It interacts with YouTube in ways that may violate [YouTube's Terms of Service](https://www.youtube.com/t/terms),
+including fetching video metadata via RSS and unofficial APIs, proxying streams through
+[Invidious](https://github.com/iv-org/invidious), and embedding content outside of
+YouTube's standard player. This is similar to how projects like Invidious, NewPipe,
+and yt-dlp operate. If YouTube ever ships real parental controls — not the "kid-safe
+algorithm" that thinks Huggy Wuggy is educational — we'd happily stop maintaining this.
+
+Don't use this to run a public service, redistribute content, or do anything
+commercial. This is a dad project. You are responsible for how you use it.
 
 ---
 
