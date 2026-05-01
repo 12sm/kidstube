@@ -13,7 +13,7 @@
  * Usage:
  *   node backend/scripts/setup-session.js <profileId>
  *
- * Example (Child1 = 5, Child2 = 6):
+ * Example:
  *   node backend/scripts/setup-session.js 5
  *   node backend/scripts/setup-session.js 6
  *

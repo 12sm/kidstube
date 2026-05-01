@@ -3,9 +3,13 @@ sub init()
 
     ' Profile selection
     m.profileUI = m.top.findNode("profileUI")
-    m.child1Focus = m.top.findNode("child1Focus")
-    m.child2Focus = m.top.findNode("child2Focus")
+    m.profile1Focus = m.top.findNode("profile1Focus")
+    m.profile2Focus = m.top.findNode("profile2Focus")
     m.selectedProfile = 0
+
+    ' Fetch profiles from API
+    m.profiles = []
+    fetchProfiles()
 
     ' App layout
     m.appLayout = m.top.findNode("appLayout")
@@ -28,13 +32,39 @@ sub onNavBarExpand()
     m.contentShiftAnim.control = "start"
 end sub
 
+sub fetchProfiles()
+    task = createObject("roSGNode", "FetchTask")
+    task.url = m.global.backendUrl + "/api/profiles"
+    task.observeFieldScoped("response", "onProfilesFetched")
+    task.control = "run"
+    m.profileFetchTask = task
+end sub
+
+sub onProfilesFetched()
+    resp = m.profileFetchTask.response
+    m.profileFetchTask.unobserveField("response")
+    if resp <> invalid and resp.profiles <> invalid
+        m.profiles = resp.profiles
+        if m.profiles.count() > 0
+            p1 = m.profiles[0]
+            m.top.findNode("profile1Initial").text = left(p1.name, 1)
+            m.top.findNode("profile1Name").text = p1.name
+        end if
+        if m.profiles.count() > 1
+            p2 = m.profiles[1]
+            m.top.findNode("profile2Initial").text = left(p2.name, 1)
+            m.top.findNode("profile2Name").text = p2.name
+        end if
+    end if
+end sub
+
 sub updateProfileHighlight()
     if m.selectedProfile = 0
-        m.child1Focus.color = "0xFFFFFF55"
-        m.child2Focus.color = "0x00000000"
+        m.profile1Focus.color = "0xFFFFFF55"
+        m.profile2Focus.color = "0x00000000"
     else
-        m.child1Focus.color = "0x00000000"
-        m.child2Focus.color = "0xFFFFFF55"
+        m.profile1Focus.color = "0x00000000"
+        m.profile2Focus.color = "0xFFFFFF55"
     end if
 end sub
 
@@ -102,9 +132,9 @@ function onKeyEvent(key as string, press as boolean) as boolean
     if m.profileUI.visible
         if key = keys.ok or key = keys.play
             if m.selectedProfile = 0
-                selectProfile(5, "Child1")
+                selectProfile(m.profiles[0].id, m.profiles[0].name)
             else
-                selectProfile(6, "Child2")
+                selectProfile(m.profiles[1].id, m.profiles[1].name)
             end if
             return true
         else if key = keys.right and m.selectedProfile = 0

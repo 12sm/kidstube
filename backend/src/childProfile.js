@@ -6,7 +6,7 @@ const db = require('./db');
 /**
  * Generate an initial child profile markdown from guided interview answers.
  *
- * @param {string} profileName - e.g. "Child1"
+ * @param {string} profileName - the child's display name
  * @param {{ ageGrade, loves, avoid, tone, other }} answers
  * @returns {Promise<string>} markdown profile text
  */
@@ -102,7 +102,7 @@ async function refreshParentInterests(profileId, markdown) {
  * @returns {string}
  */
 function buildCombinedProfile(dbModule) {
-  const PROFILE_IDS = [5, 6]; // Child1, Child2
+  const PROFILE_IDS = [5, 6];
   const profiles = [];
 
   for (const id of PROFILE_IDS) {

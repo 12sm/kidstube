@@ -10,7 +10,7 @@ Write new memories there — not to `~/.claude/projects/` — so all machines sh
 of any session to see what's queued. Overnight sessions pick the top TODO, implement it, open a PR.
 
 ## Project Summary
-Parent-controlled YouTube PWA for kids (profiles: Child1 and Child2, profile IDs 5 and 6).
+Parent-controlled YouTube PWA for kids. Two child profiles (IDs 5 and 6).
 Videos are curated nightly via a batch pipeline — no real-time filtering.
 The UI is intentionally styled to look and feel like the native YouTube app.
 
@@ -69,8 +69,8 @@ SESSION_SECRET=
 ```
 
 ## Profile IDs
-- Child1 = profile ID 5
-- Child2 = profile ID 6
+- Profile ID 5 (child 1)
+- Profile ID 6 (child 2)
 
 ## Coding Conventions
 - Tailwind custom tokens: `yt-bg`, `yt-text`, `yt-muted`, `yt-card`, `yt-surface`, `yt-border`, `yt-hover`, `yt-red`

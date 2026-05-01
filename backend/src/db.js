@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
-const { normalizeTag, normalizeTags, CANONICAL_TAGS, ALIAS_MAP } = require('./tags');
+const { normalizeTag, normalizeTags, CANONICAL_TAGS, ALIAS_MAP, TAG_CATEGORIES, TAG_TO_CATEGORY } = require('./tags');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'kidstube.db');
 
@@ -269,6 +269,28 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_tag_settings_profile ON interest_tag_settings(profile_id);
   `);
 
+  // tag_category_map — populated from tags.js on every startup
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tag_category_map (
+      tag      TEXT PRIMARY KEY,
+      category TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tcm_category ON tag_category_map(category);
+  `);
+  {
+    const upsert = db.prepare(
+      'INSERT INTO tag_category_map (tag, category) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET category = excluded.category'
+    );
+    const insertAll = db.transaction((entries) => {
+      for (const [tag, category] of entries) upsert.run(tag, category);
+    });
+    const entries = [];
+    for (const [category, tags] of Object.entries(TAG_CATEGORIES)) {
+      for (const tag of tags) entries.push([tag, category]);
+    }
+    insertAll(entries);
+  }
+
   // Migrate: normalize existing tags (one-time)
   db.exec(`CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, ran_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   const hasTagNorm = db.prepare("SELECT 1 FROM migrations WHERE key = 'tag_normalization_v1'").get();
@@ -462,18 +484,21 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
   return getDb().prepare(`
     WITH raw_interests AS (
       SELECT pi.tag,
-        pi.weight * COALESCE(its.multiplier, 1.0)              AS scaled,
-        COALESCE(its.hard_cap, NULL)                            AS hard_cap,
-        p.behavior_weight_ceiling                               AS ceiling
+        pi.weight * COALESCE(its.multiplier, its_cat.multiplier, 1.0)  AS scaled,
+        COALESCE(its.hard_cap, its_cat.hard_cap, NULL)                 AS hard_cap,
+        p.behavior_weight_ceiling                                       AS ceiling
       FROM profile_interests pi
       JOIN profiles p ON p.id = pi.profile_id
+      LEFT JOIN tag_category_map tcm ON tcm.tag = pi.tag
       LEFT JOIN interest_tag_settings its
         ON its.profile_id = pi.profile_id AND its.tag = pi.tag
+      LEFT JOIN interest_tag_settings its_cat
+        ON its_cat.profile_id = pi.profile_id AND its_cat.tag = tcm.category
       WHERE pi.profile_id = ? AND pi.source = 'behavior'
     ),
     effective_interests AS (
       SELECT tag, scaled, hard_cap, ceiling,
-        (SELECT MAX(scaled) FROM raw_interests WHERE hard_cap IS NULL) AS max_scaled
+        (SELECT MAX(scaled) FROM raw_interests) AS max_scaled
       FROM raw_interests
     ),
     eff_weights AS (
@@ -485,22 +510,19 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
       FROM effective_interests
     ),
     zeroed_tags AS (
-      SELECT tag FROM interest_tag_settings WHERE profile_id = ? AND multiplier = 0
-    ),
-    penalized_tags AS (
-      SELECT tag, multiplier FROM interest_tag_settings WHERE profile_id = ? AND multiplier > 0 AND multiplier < 1.0
+      SELECT its.tag FROM interest_tag_settings its
+      WHERE its.profile_id = ? AND its.multiplier = 0
+      UNION
+      SELECT tcm.tag FROM tag_category_map tcm
+      JOIN interest_tag_settings its ON its.profile_id = ? AND its.tag = tcm.category AND its.multiplier = 0
+      LEFT JOIN interest_tag_settings ov ON ov.profile_id = ? AND ov.tag = tcm.tag
+      WHERE ov.id IS NULL
     ),
     int_scores AS (
-      SELECT vt.video_id, MIN(SUM(ew.effective_weight), 4.0) AS interest_score
+      SELECT vt.video_id,
+        SUM(ew.effective_weight) AS interest_score
       FROM video_tags vt
       JOIN eff_weights ew ON vt.tag = ew.tag
-      GROUP BY vt.video_id
-    ),
-    penalty_scores AS (
-      SELECT vt.video_id,
-        EXP(SUM(LN(pt.multiplier))) AS penalty
-      FROM video_tags vt
-      JOIN penalized_tags pt ON vt.tag = pt.tag
       GROUP BY vt.video_id
     ),
     watch_comp AS (
@@ -517,7 +539,6 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
     LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c
       ON v.channel_id = c.channel_id
     LEFT JOIN int_scores ON v.video_id = int_scores.video_id
-    LEFT JOIN penalty_scores ps ON v.video_id = ps.video_id
     LEFT JOIN watch_comp ON v.video_id = watch_comp.video_id
     WHERE v.channel_id IN (${placeholders})
       AND v.status = 'approved'
@@ -532,12 +553,11 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
     ORDER BY
       (COALESCE(int_scores.interest_score, 0.5)
         + CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 1.0 ELSE 0.0 END)
-      * COALESCE(ps.penalty, 1.0)
       * (1.0 / (1.0 + COALESCE(watch_comp.total_completed, 0) * 0.5))
       * (0.7 + 0.3 * (ABS(RANDOM()) / 9223372036854775807.0))
       DESC
     LIMIT ? OFFSET ?
-  `).all([profileId, profileId, profileId, profileId, ...channelIds, profileId, limit, offset]);
+  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, limit, offset]);
 }
 
 function blockVideo(profileId, videoId) {
@@ -899,11 +919,17 @@ function getEffectiveInterests(profileId) {
     ORDER BY weight DESC
   `).all(profileId);
 
-  // Compute scaled weights for behavior tags first so we can normalize
+  // Resolve setting for a tag: tag-specific first, then category fallback
+  const resolve = (tag) => settings[tag]
+    || (TAG_TO_CATEGORY[tag] ? settings[TAG_TO_CATEGORY[tag]] : null);
+
+  // Compute scaled weights for behavior tags first so we can normalize.
+  // Include ALL tags in the baseline so that adding a cap to one tag
+  // doesn't cause a normalization cliff that shifts every other tag.
   const behaviorScaled = [];
   for (const row of rows) {
     if (row.source !== 'behavior') continue;
-    const s = settings[row.tag];
+    const s = resolve(row.tag);
     const multiplier = s?.multiplier ?? 1.0;
     behaviorScaled.push({ tag: row.tag, scaled: row.weight * multiplier });
   }
@@ -914,7 +940,7 @@ function getEffectiveInterests(profileId) {
       // Parent-set interests pass through unchanged
       return { ...row, effective_weight: row.weight };
     }
-    const s = settings[row.tag];
+    const s = resolve(row.tag);
     const multiplier = s?.multiplier ?? 1.0;
     const hardCap    = s?.hard_cap ?? null;
     const scaled     = row.weight * multiplier;
@@ -1332,17 +1358,27 @@ function getFeedPreview(profileId, overrides = {}, ceilingOverride = null) {
     WHERE profile_id = ? AND source = 'behavior'
   `).all(profileId);
 
+  // Resolve persisted setting: tag-specific first, then category fallback
+  const resolvePersisted = (tag) => persistedSettings[tag]
+    || (TAG_TO_CATEGORY[tag] ? persistedSettings[TAG_TO_CATEGORY[tag]] : null);
+
+  // Resolve override: tag-specific first, then category fallback
+  const resolveOverride = (tag) => overrides[tag]
+    || (TAG_TO_CATEGORY[tag] ? overrides[TAG_TO_CATEGORY[tag]] : null);
+
   // Compute scaled weights with overrides
   const scaledWeights = {};
-  let maxScaled = 0;
   for (const row of behaviorInterests) {
-    const override = overrides[row.tag];
-    const persisted = persistedSettings[row.tag];
+    const override = resolveOverride(row.tag);
+    const persisted = resolvePersisted(row.tag);
     const multiplier = override?.multiplier ?? persisted?.multiplier ?? 1.0;
     const scaled = row.weight * multiplier;
     scaledWeights[row.tag] = { scaled, hard_cap: override?.hard_cap ?? persisted?.hard_cap ?? null };
-    if (scaled > maxScaled) maxScaled = scaled;
   }
+  // Normalization baseline: include ALL tags so capping one tag
+  // doesn't cause a cliff that shifts every other tag.
+  const maxScaled = Object.values(scaledWeights)
+    .reduce((m, s) => Math.max(m, s.scaled), 0);
 
   // Normalize to effective weights
   const effectiveWeights = {};
@@ -1351,13 +1387,13 @@ function getFeedPreview(profileId, overrides = {}, ceilingOverride = null) {
     effectiveWeights[tag] = hard_cap !== null ? Math.min(normalized, hard_cap) : normalized;
   }
 
-  // Build zeroed and penalized tag sets from combined overrides + persisted
+  // Build zeroed tag set from combined overrides + persisted (with category fallback)
   const zeroedTags = new Set();
-  const penalizedTags = {};  // tag → multiplier
   for (const row of behaviorInterests) {
-    const mult = overrides[row.tag]?.multiplier ?? persistedSettings[row.tag]?.multiplier ?? 1.0;
+    const resolved = resolvePersisted(row.tag);
+    const ov = resolveOverride(row.tag);
+    const mult = ov?.multiplier ?? resolved?.multiplier ?? 1.0;
     if (mult === 0) zeroedTags.add(row.tag);
-    else if (mult < 1.0) penalizedTags[row.tag] = mult;
   }
 
   // Get all approved videos from whitelisted channels
@@ -1410,21 +1446,12 @@ function getFeedPreview(profileId, overrides = {}, ceilingOverride = null) {
     if (tags.some(t => zeroedTags.has(t))) continue;
 
     const matchedTags = tags.filter(t => effectiveWeights[t]);
-    const interestScore = Math.min(
-      matchedTags.reduce((sum, t) => sum + (effectiveWeights[t] || 0), 0),
-      4.0
-    );
-
-    // Penalty: multiply penalties for each penalized tag the video carries
-    let penalty = 1.0;
-    for (const t of tags) {
-      if (penalizedTags[t]) penalty *= penalizedTags[t];
-    }
+    const interestScore = matchedTags.reduce((sum, t) => sum + (effectiveWeights[t] || 0), 0);
 
     const recencyBoost = v.processed_at && new Date(v.processed_at) > new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) ? 1.0 : 0.0;
     const watchPenalty = 1.0 / (1.0 + (watchMap[v.video_id] || 0) * 0.5);
     // Fixed randomness factor for stable preview (0.85)
-    const score = (Math.max(interestScore, 0.5) + recencyBoost) * penalty * watchPenalty * 0.85;
+    const score = (Math.max(interestScore, 0.5) + recencyBoost) * watchPenalty * 0.85;
 
     scored.push({
       video_id: v.video_id,

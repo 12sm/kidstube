@@ -1,5 +1,7 @@
 'use strict';
 
+const { TAG_TO_CATEGORY } = require('./tags');
+
 /**
  * Returns recommended videos for a given video and profile.
  *
@@ -35,15 +37,28 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
     `SELECT 1 FROM profile_interests WHERE profile_id = ? LIMIT 1`
   ).get(profileId);
 
-  // Tags the parent has explicitly capped (multiplier < 1.0) — used to build the diversity pool
-  const cappedTags = rawDb.prepare(
-    `SELECT tag FROM interest_tag_settings WHERE profile_id = ? AND multiplier < 1.0`
-  ).all(profileId).map(r => r.tag);
+  // Tags the parent has explicitly capped (multiplier < 1.0) — includes category cascade
+  const cappedTags = rawDb.prepare(`
+    SELECT its.tag FROM interest_tag_settings its
+    WHERE its.profile_id = ? AND its.multiplier > 0 AND its.multiplier < 1.0
+    UNION
+    SELECT tcm.tag FROM tag_category_map tcm
+    JOIN interest_tag_settings its ON its.profile_id = ? AND its.tag = tcm.category
+      AND its.multiplier > 0 AND its.multiplier < 1.0
+    LEFT JOIN interest_tag_settings ov ON ov.profile_id = ? AND ov.tag = tcm.tag
+    WHERE ov.id IS NULL
+  `).all(profileId, profileId, profileId).map(r => r.tag);
 
-  // Tags with multiplier = 0 → hard exclude any video carrying these tags
-  const zeroedTags = rawDb.prepare(
-    `SELECT tag FROM interest_tag_settings WHERE profile_id = ? AND multiplier = 0`
-  ).all(profileId).map(r => r.tag);
+  // Tags with multiplier = 0 → hard exclude — includes category cascade
+  const zeroedTags = rawDb.prepare(`
+    SELECT its.tag FROM interest_tag_settings its
+    WHERE its.profile_id = ? AND its.multiplier = 0
+    UNION
+    SELECT tcm.tag FROM tag_category_map tcm
+    JOIN interest_tag_settings its ON its.profile_id = ? AND its.tag = tcm.category AND its.multiplier = 0
+    LEFT JOIN interest_tag_settings ov ON ov.profile_id = ? AND ov.tag = tcm.tag
+    WHERE ov.id IS NULL
+  `).all(profileId, profileId, profileId).map(r => r.tag);
 
   const POOL           = limit * 3;
   const DIVERSITY_TARGET = cappedTags.length > 0 ? Math.round(limit / 3) : 0; // ~5 of 15 slots
@@ -113,18 +128,21 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
       sql: `
         WITH raw_interests AS (
           SELECT pi.tag,
-            pi.weight * COALESCE(its.multiplier, 1.0)                AS scaled,
-            COALESCE(its.hard_cap, NULL)                              AS hard_cap,
-            p.behavior_weight_ceiling                                 AS ceiling
+            pi.weight * COALESCE(its.multiplier, its_cat.multiplier, 1.0)  AS scaled,
+            COALESCE(its.hard_cap, its_cat.hard_cap, NULL)                 AS hard_cap,
+            p.behavior_weight_ceiling                                       AS ceiling
           FROM profile_interests pi
           JOIN profiles p ON p.id = pi.profile_id
+          LEFT JOIN tag_category_map tcm ON tcm.tag = pi.tag
           LEFT JOIN interest_tag_settings its
             ON its.profile_id = pi.profile_id AND its.tag = pi.tag
+          LEFT JOIN interest_tag_settings its_cat
+            ON its_cat.profile_id = pi.profile_id AND its_cat.tag = tcm.category
           WHERE pi.profile_id = ? AND pi.source = 'behavior'
         ),
         effective_interests AS (
           SELECT tag, scaled, hard_cap, ceiling,
-            (SELECT MAX(scaled) FROM raw_interests WHERE hard_cap IS NULL) AS max_scaled
+            (SELECT MAX(scaled) FROM raw_interests) AS max_scaled
           FROM raw_interests
         ),
         eff_weights AS (
@@ -139,7 +157,7 @@ function getRecommendedVideos(db, videoId, profileId, limit = 15) {
           SELECT tag FROM video_tags WHERE video_id = ?
         ),
         int_scores AS (
-          SELECT vt.video_id, MIN(SUM(ew.effective_weight), 4.0) AS interest_score
+          SELECT vt.video_id, SUM(ew.effective_weight) AS interest_score
           FROM video_tags vt
           JOIN eff_weights ew ON vt.tag = ew.tag
           GROUP BY vt.video_id

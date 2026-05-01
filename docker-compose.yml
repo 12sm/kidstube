@@ -57,12 +57,12 @@ services:
           host: invidious-db
           port: 5432
         check_tables: true
-        hmac_key: REDACTED_HMAC_KEY
+        hmac_key: ${INVIDIOUS_HMAC_KEY:-changeme_hmac_key}
         invidious_companion:
           - private_url: "http://companion:8282/companion"
-        invidious_companion_key: "REDACTED_COMPANION_KEY"
+        invidious_companion_key: "${INVIDIOUS_COMPANION_KEY:-changeme_companion_key}"
         external_port: 3080
-        domain: LAN_IP:3080
+        domain: ${LAN_IP:-localhost}:3080
         https_only: false
         popular_enabled: false
         registration_enabled: false
@@ -86,7 +86,7 @@ services:
     container_name: kidstube-companion
     restart: unless-stopped
     environment:
-      - SERVER_SECRET_KEY=REDACTED_COMPANION_KEY
+      - SERVER_SECRET_KEY=${INVIDIOUS_COMPANION_KEY:-changeme_companion_key}
     cap_drop:
       - ALL
     read_only: true

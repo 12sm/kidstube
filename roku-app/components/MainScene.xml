@@ -11,23 +11,23 @@
                    translation="[0, 180]"
                    font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
             <Group id="profileCards" translation="[0, 280]">
-                <Group id="child1Card" translation="[370, 0]">
-                    <Rectangle id="child1Bg" width="160" height="160" color="0x4CAF50FF" />
-                    <Label text="W" width="160" height="160"
+                <Group id="profile1Card" translation="[370, 0]">
+                    <Rectangle id="profile1Bg" width="160" height="160" color="0x4CAF50FF" />
+                    <Label id="profile1Initial" text="" width="160" height="160"
                            horizAlign="center" vertAlign="center"
                            font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
-                    <Rectangle id="child1Focus" width="160" height="160" color="0x00000000" />
-                    <Label text="Child1" width="160" horizAlign="center"
+                    <Rectangle id="profile1Focus" width="160" height="160" color="0x00000000" />
+                    <Label id="profile1Name" text="" width="160" horizAlign="center"
                            translation="[0, 172]"
                            font="font:MediumBoldSystemFont" color="0xFFFFFFFF" />
                 </Group>
-                <Group id="child2Card" translation="[720, 0]">
-                    <Rectangle id="child2Bg" width="160" height="160" color="0xFF9800FF" />
-                    <Label text="E" width="160" height="160"
+                <Group id="profile2Card" translation="[720, 0]">
+                    <Rectangle id="profile2Bg" width="160" height="160" color="0xFF9800FF" />
+                    <Label id="profile2Initial" text="" width="160" height="160"
                            horizAlign="center" vertAlign="center"
                            font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
-                    <Rectangle id="child2Focus" width="160" height="160" color="0x00000000" />
-                    <Label text="Child2" width="160" horizAlign="center"
+                    <Rectangle id="profile2Focus" width="160" height="160" color="0x00000000" />
+                    <Label id="profile2Name" text="" width="160" horizAlign="center"
                            translation="[0, 172]"
                            font="font:MediumBoldSystemFont" color="0xFFFFFFFF" />
                 </Group>

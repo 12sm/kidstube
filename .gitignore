@@ -18,15 +18,20 @@ frontend/.vite/
 # macOS
 .DS_Store
 
-# Claude Code — local settings are machine-specific, but .claude/memory/ is intentionally tracked
+# Claude Code — local settings and memory are machine-specific
 .claude/settings.local.json
+.claude/memory/
 
 # Docker volumes / runtime
 *.log
 
-# Playwright-generated screenshots (ephemeral, rebuilt on demand)
-screenshots/playwright/
+# Screenshots (reference images, not needed for the app)
+screenshots/
 *.docx
+
+# Superpowers (local planning/design docs)
+.superpowers/
+docs/superpowers/
 
 # Git worktrees
 .worktrees/

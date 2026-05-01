@@ -123,6 +123,48 @@ const CANONICAL_TAGS = {
   'family-friendly':   [],
 };
 
+// ── Tag Categories ───────────────────────────────────────────────────────────
+// Maps each canonical tag to a parent category. A multiplier/cap set on a
+// category name cascades to all member tags unless overridden per-tag.
+const TAG_CATEGORIES = {
+  gaming: [
+    'gaming', 'gaming-challenge', 'gaming-tutorial', 'gaming-strategy', 'gaming-updates',
+    'pvp', 'multiplayer', 'speedrun', 'simulation', 'survival-games', 'tower-defense',
+    'idle-games', 'parkour',
+    'minecraft', 'minecraft-mods', 'minecraft-challenge', 'minecraft-building',
+    'minecraft-roleplay', 'minecraft-animation',
+    'roblox', 'blox-fruits', 'pet-simulator', 'brookhaven', 'adopt-me', 'build-a-boat',
+    'creatures-of-sonaria', 'grow-a-garden',
+    'sonic', 'super-mario', 'plants-vs-zombies', 'geometry-dash', 'pokemon', 'fortnite', 'incredibox',
+  ],
+  animals: ['animals', 'dogs', 'cats', 'pets', 'animal-rescue', 'wildlife'],
+  educational: ['educational', 'math', 'science', 'phonics', 'coding', 'geography', 'history', 'astronomy'],
+  shows: ['sesame-street', 'bluey', 'peppa-pig', 'numberblocks', 'pbs-kids', 'spongebob', 'disney', 'star-trek'],
+  creative: ['creative-building', 'lego', 'engineering', 'crafts', 'stop-motion'],
+  entertainment: [
+    'animation', 'comedy', 'music', 'dance', 'storytelling', 'mystery', 'roleplay',
+    'pranks', 'reaction-videos', 'unboxing', 'asmr', 'behind-the-scenes', 'vlog',
+  ],
+  sports: ['sports', 'gymnastics', 'trick-shots', 'nerf'],
+  other: [
+    'adventure', 'cooking', 'friendship', 'community-service', 'dinosaurs', 'robots', 'magic',
+    'monster-trucks', 'cars', 'trains', 'guessing-games', 'problem-solving', 'hide-and-seek',
+    'competition', 'family-friendly',
+  ],
+};
+
+// Reverse map: canonical tag → category name
+const TAG_TO_CATEGORY = {};
+for (const [category, tags] of Object.entries(TAG_CATEGORIES)) {
+  for (const tag of tags) {
+    TAG_TO_CATEGORY[tag] = category;
+  }
+}
+
+function getTagCategory(tag) {
+  return TAG_TO_CATEGORY[tag] || null;
+}
+
 // Build reverse lookup: alias → canonical
 const ALIAS_MAP = {};
 for (const [canonical, aliases] of Object.entries(CANONICAL_TAGS)) {
@@ -166,4 +208,4 @@ function getCanonicalList() {
   return Object.keys(CANONICAL_TAGS);
 }
 
-module.exports = { CANONICAL_TAGS, ALIAS_MAP, normalizeTag, normalizeTags, getCanonicalList };
+module.exports = { CANONICAL_TAGS, ALIAS_MAP, TAG_CATEGORIES, TAG_TO_CATEGORY, normalizeTag, normalizeTags, getCanonicalList, getTagCategory };
