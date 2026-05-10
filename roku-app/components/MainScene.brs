@@ -41,7 +41,7 @@ sub fetchProfiles()
 end sub
 
 sub onProfilesFetched()
-    resp = m.profileFetchTask.response
+    resp = ParseJson(m.profileFetchTask.response)
     m.profileFetchTask.unobserveField("response")
     if resp <> invalid and resp.profiles <> invalid
         m.profiles = resp.profiles
