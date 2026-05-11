@@ -7,7 +7,11 @@ Write new memories there — not to `~/.claude/projects/` — so all machines sh
 
 ## Autonomous Work Backlog
 `BACKLOG.md` (repo root) — tasks approved for overnight Claude Code sessions. Read it at the start
-of any session to see what's queued. Overnight sessions pick the top TODO, implement it, open a PR.
+of any session to see what's queued. The full workflow is in BACKLOG.md, but the critical rule:
+
+**After opening a PR, move the task from `## TODO` to `## IN REVIEW` in BACKLOG.md and commit
+that change on the PR branch.** This prevents the next session from re-implementing the same task.
+If `## IN REVIEW` already has an entry, a PR is pending human review — do not start new work.
 
 ## Project Summary
 Parent-controlled YouTube PWA for kids. Two child profiles (IDs 5 and 6).
