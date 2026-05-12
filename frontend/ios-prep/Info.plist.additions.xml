@@ -1,0 +1,20 @@
+<!--
+  Apply these additions to frontend/ios/App/App/Info.plist (created by
+  `npx cap add ios` on a Mac). Both keys go inside the root <dict>.
+
+  NSAppTransportSecurity → required to load http:// from cleartext server.url.
+  Without it, WKWebView blocks the LAN connection and the app shows a blank
+  screen. Must be paired with `cleartext: true` in capacitor.config.ts —
+  both are required; one without the other still blocks HTTP.
+
+  CFBundleDisplayName → home-screen label (shown under the icon). The kids
+  see this name, so the spec calls for "Videos" to match the YouTube-app
+  feel of the PWA (which says "YouTube" not "KidsTube" everywhere).
+-->
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+</dict>
+<key>CFBundleDisplayName</key>
+<string>Videos</string>

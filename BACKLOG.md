@@ -14,11 +14,9 @@ Tasks in this file are approved for overnight Claude Code sessions. One task per
 
 ---
 
-## TODO
-
----
-
 ### TASK: Build a KidsTube iOS app (Capacitor wrapper)
+
+> **Session status (2026-05-12):** Partial implementation by autonomous Linux session. The task's prerequisite (Mac with Xcode 15+, CocoaPods, Apple Developer account) was not satisfied — the session ran on WSL2 Linux. Linux-safe prep committed on this branch: `@capacitor/{core,ios,cli}` installed, `frontend/capacitor.config.ts` created per spec, and iOS native assets staged in `frontend/ios-prep/` ready to be dropped into the Xcode project. Remaining steps — `npx cap add ios`, dropping the Swift file + plist + storyboard edits, the `MiniPlayer.jsx` autoplay change (deliberately skipped because it would break the live PWA), Xcode signing, archive, TestFlight upload — require a Mac. See PR description and `frontend/ios-prep/README.md` for the completion checklist.
 
 **Session type:** Single-evening autonomous implementation — no human input required mid-run.
 **Outcome:** Native iOS app on TestFlight for family iPads, with fully unmuted autoplay via WKWebView config.
@@ -242,6 +240,10 @@ No changes to backend, Docker Compose, or nginx.conf.
 - [ ] App runs in iPad Simulator — video plays with audio without a tap
 - [ ] `xcodebuild archive` exits 0
 - [ ] Build appears in App Store Connect TestFlight as "Ready to Submit"
+
+---
+
+## TODO
 
 ---
 

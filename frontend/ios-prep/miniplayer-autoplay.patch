@@ -1,0 +1,48 @@
+### MiniPlayer.jsx: re-enable unmuted autoplay (Mac/iOS app only)
+
+File: `frontend/src/components/MiniPlayer.jsx`
+
+This change is intentionally NOT shipped on the Linux prep branch because
+it would break the live PWA: browsers (Safari, Chrome, Firefox) block
+unmuted autoplay, so `autoplay=1` without `mute=1` produces a paused
+iframe while our React state thinks it's playing. The user would tap the
+play button and our handler would call `pauseVideo` because `playing` is
+already true. State desync.
+
+The change is safe ONLY inside WKWebView with
+`config.mediaTypesRequiringUserActionForPlayback = []` (see
+CustomViewController.swift). Apply it on the Mac, in the same commit as
+the iOS project, so the two ship together.
+
+---
+
+Around line 75–76, restore initial state to autoplay-friendly defaults:
+
+    -  const [muted, setMuted]         = useState(false);
+    -  const [playing, setPlaying]     = useState(false);
+    +  const [muted, setMuted]         = useState(false);
+    +  const [playing, setPlaying]     = useState(true);
+
+(`muted` is already `false`; only `playing` needs to flip to `true`.)
+
+Around line 403–406, restore autoplay in the embed URL:
+
+    -  const src =
+    -    `https://www.youtube.com/embed/${videoId}` +
+    -    `?playsinline=1&rel=0&modestbranding=1&fs=0` +
+    -    `&cc_load_policy=0&iv_load_policy=3&controls=0&enablejsapi=1`;
+    +  // autoplay=1 without mute=1 works here because WKWebView is configured
+    +  // with mediaTypesRequiringUserActionForPlayback = [] in
+    +  // CustomViewController.swift. Do NOT ship this change to the live PWA —
+    +  // regular browsers will block it and the React state will desync from
+    +  // the iframe state.
+    +  const src =
+    +    `https://www.youtube.com/embed/${videoId}` +
+    +    `?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=0` +
+    +    `&cc_load_policy=0&iv_load_policy=3&controls=0&enablejsapi=1`;
+
+After editing:
+
+    cd frontend
+    npm run build
+    npx cap sync ios
