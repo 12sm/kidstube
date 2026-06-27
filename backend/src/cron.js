@@ -92,6 +92,13 @@ async function runNightlyJob() {
         }
       }
 
+      // Step 4c: Pull parent-curated enrichment topics into the library
+      try {
+        await sourceEnrichmentTopics(profile, stats);
+      } catch (err) {
+        console.error(`[Cron] Enrichment sourcing failed for ${profile.name}:`, err.message);
+      }
+
       // Step 5: Fetch related videos for newly approved videos (Phase 2 enhancement)
       // Get recently approved videos that don't have related content yet
       const approvedForRelated = db.getApprovedVideosForRelated(profile.id, 20);
@@ -312,6 +319,44 @@ async function backfillChannel(channel, profileId, llmState) {
   return stats;
 }
 
+// Nightly: pull a handful of parent-curated enrichment topics into the library.
+// Cheap (a few searches once/day) vs interactive search. Inserts survivors as
+// approved enrichment videos so the feed composer can surface them.
+async function sourceEnrichmentTopics(profile, stats, deps = {}) {
+  const _db = deps.db || db;
+  const _youtube = deps.youtube || youtube;
+  const _filter = deps.filter || filter;
+
+  const topics = _db.getActiveEnrichmentTopics(profile.id);
+  const rules = _db.getFilterRules(profile.id);
+  for (const topic of topics) {
+    let videos = [];
+    try {
+      videos = await _youtube.searchVideos(topic.value, { open: true, maxResults: 15 });
+    } catch (err) {
+      console.error(`[Enrichment] search failed for "${topic.value}":`, err.message);
+      continue;
+    }
+    for (const video of videos) {
+      if (_db.videoExists(video.video_id)) continue;
+      if (_filter.isShort(video) || _filter.isLive(video)) continue;
+      if (_filter.runFilterPass(video, rules).rejected) continue;
+      _db.insertVideo({
+        ...video,
+        transcript: null,
+        channel_thumbnail: null,
+        status: 'approved',
+        is_recommended: 0,
+        source_video_id: null,
+        view_count: null,
+        needs_llm_review: 1,
+        discovery_source: 'enrichment',
+      });
+      stats.approved = (stats.approved || 0) + 1;
+    }
+  }
+}
+
 async function syncSubscriptions(profile) {
   // Only sync if we haven't synced recently (check last_synced on channels)
   const existingChannels = db.getChannelsForProfile(profile.id);
@@ -415,4 +460,4 @@ function scheduleJob() {
   });
 }
 
-module.exports = { runNightlyJob, scheduleJob, syncSubscriptions, backfillChannel };
+module.exports = { runNightlyJob, scheduleJob, syncSubscriptions, backfillChannel, sourceEnrichmentTopics };

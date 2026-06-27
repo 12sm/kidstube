@@ -2,6 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { normalizeTag, normalizeTags, CANONICAL_TAGS, ALIAS_MAP, TAG_CATEGORIES, TAG_TO_CATEGORY } = require('./tags');
+const { GAMING_TAGS } = require('./feedConstants');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'kidstube.db');
 
@@ -162,6 +163,17 @@ function migrate() {
       UNIQUE(profile_id, query)
     );
     CREATE INDEX IF NOT EXISTS idx_search_queries_profile ON search_queries(profile_id, searched_at DESC);
+
+    CREATE TABLE IF NOT EXISTS enrichment_sources (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+      type        TEXT NOT NULL,
+      value       TEXT NOT NULL,
+      label       TEXT,
+      active      INTEGER NOT NULL DEFAULT 1,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(profile_id, type, value)
+    );
   `);
 
   // Fix videos.channel_id FK — channel_id is no longer a unique key in channels after composite-key migration
@@ -541,8 +553,11 @@ function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
       ON v.channel_id = c.channel_id
     LEFT JOIN int_scores ON v.video_id = int_scores.video_id
     LEFT JOIN watch_comp ON v.video_id = watch_comp.video_id
-    WHERE v.channel_id IN (${placeholders})
+    WHERE (v.channel_id IN (${placeholders}) OR v.discovery_source = 'enrichment')
       AND v.status = 'approved'
+      AND v.channel_id NOT IN (
+        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 0
+      )
       AND v.video_id NOT IN (
         SELECT value FROM filter_rules
         WHERE rule_type = 'video_block'
@@ -559,7 +574,44 @@ function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
       * (0.7 + 0.3 * (ABS(RANDOM()) / 9223372036854775807.0))
       DESC
     LIMIT ? OFFSET ?
-  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, ...excludeIds, limit, offset]);
+  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, profileId, ...excludeIds, limit, offset]);
+}
+
+// Top non-gaming + growth videos for a profile, block-aware. Used to guarantee
+// the feed pool contains enrichment candidates even when the gaming-dominated
+// interest score would otherwise crowd them all out. Growth (enrichment-source)
+// videos rank first, then fresh, then randomized for variety.
+function getEnrichmentCandidates(profileId, limit = 40, excludeIds = []) {
+  const channels = getWhitelistedChannels(profileId);
+  const channelIds = channels.map(c => c.channel_id);
+  const enrichChannelIds = getEnrichmentChannelIds(profileId);
+  const chPh = channelIds.length ? channelIds.map(() => '?').join(',') : null;
+  const exPh = excludeIds.length ? excludeIds.map(() => '?').join(',') : null;
+  const tagPh = GAMING_TAGS.map(() => '?').join(',');
+  const enrPh = enrichChannelIds.length ? enrichChannelIds.map(() => '?').join(',') : null;
+  return getDb().prepare(`
+    SELECT v.*, c.thumbnail_url AS channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c
+      ON v.channel_id = c.channel_id
+    WHERE v.status = 'approved'
+      AND (${chPh ? `v.channel_id IN (${chPh}) OR ` : ''}v.discovery_source = 'enrichment')
+      AND v.channel_id NOT IN (
+        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 0
+      )
+      AND v.video_id NOT IN (
+        SELECT value FROM filter_rules WHERE rule_type = 'video_block' AND (profile_id = ? OR profile_id IS NULL)
+      )
+      AND v.video_id NOT IN (
+        SELECT video_id FROM video_tags WHERE tag IN (${tagPh})
+      )
+      ${exPh ? `AND v.video_id NOT IN (${exPh})` : ''}
+    ORDER BY
+      CASE WHEN v.discovery_source = 'enrichment'${enrPh ? ` OR v.channel_id IN (${enrPh})` : ''} THEN 0 ELSE 1 END,
+      CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 0 ELSE 1 END,
+      ABS(RANDOM())
+    LIMIT ?
+  `).all(...channelIds, profileId, profileId, ...GAMING_TAGS, ...excludeIds, ...enrichChannelIds, limit);
 }
 
 function blockVideo(profileId, videoId) {
@@ -1195,6 +1247,33 @@ function getSearchSuggestions(profileId, q) {
   return [...channelRows, ...titleRows];
 }
 
+// --- Enrichment sources ---
+
+function addEnrichmentSource({ profile_id, type, value, label = null }) {
+  getDb().prepare(`
+    INSERT OR IGNORE INTO enrichment_sources (profile_id, type, value, label)
+    VALUES (?, ?, ?, ?)
+  `).run(profile_id, type, value, label);
+}
+
+function getEnrichmentSources(profileId) {
+  return getDb().prepare(
+    'SELECT id, profile_id, type, value, label, active, created_at FROM enrichment_sources WHERE profile_id = ? ORDER BY type, label'
+  ).all(profileId);
+}
+
+function getActiveEnrichmentTopics(profileId) {
+  return getDb().prepare(
+    "SELECT value, label FROM enrichment_sources WHERE profile_id = ? AND type = 'topic' AND active = 1"
+  ).all(profileId);
+}
+
+function getEnrichmentChannelIds(profileId) {
+  return getDb().prepare(
+    "SELECT value FROM enrichment_sources WHERE profile_id = ? AND type = 'channel' AND active = 1"
+  ).all(profileId).map(r => r.value);
+}
+
 // Bulk apply: if channelIds provided applies only those, otherwise applies all actionable pending recs.
 function getApprovedVideoCountByChannel(channelIds) {
   if (!channelIds || channelIds.length === 0) return {};
@@ -1483,6 +1562,32 @@ function getFeedPreview(profileId, overrides = {}, ceilingOverride = null) {
   return result;
 }
 
+// --- Adaptive feed enrichment helpers ---
+
+function getGamingVideoIds(videoIds) {
+  if (!videoIds || videoIds.length === 0) return [];
+  const vidPh = videoIds.map(() => '?').join(',');
+  const tagPh = GAMING_TAGS.map(() => '?').join(',');
+  return getDb().prepare(`
+    SELECT DISTINCT video_id FROM video_tags
+    WHERE video_id IN (${vidPh}) AND tag IN (${tagPh})
+  `).all(...videoIds, ...GAMING_TAGS).map(r => r.video_id);
+}
+
+function getRecentWatchedVideoIds(profileId, limit = 20) {
+  return getDb().prepare(
+    'SELECT video_id FROM watch_history WHERE profile_id = ? ORDER BY watched_at DESC, id DESC LIMIT ?'
+  ).all(profileId, limit).map(r => r.video_id);
+}
+
+function countTaggedVideos(videoIds) {
+  if (!videoIds || videoIds.length === 0) return 0;
+  const ph = videoIds.map(() => '?').join(',');
+  return getDb().prepare(
+    `SELECT COUNT(DISTINCT video_id) AS n FROM video_tags WHERE video_id IN (${ph})`
+  ).all(...videoIds)[0].n;
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -1555,4 +1660,12 @@ module.exports = {
   deleteSearchQuery,
   searchApprovedVideos,
   getSearchSuggestions,
+  addEnrichmentSource,
+  getEnrichmentSources,
+  getActiveEnrichmentTopics,
+  getEnrichmentCandidates,
+  getEnrichmentChannelIds,
+  getGamingVideoIds,
+  getRecentWatchedVideoIds,
+  countTaggedVideos,
 };

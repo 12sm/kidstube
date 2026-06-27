@@ -396,3 +396,116 @@ describe('channel_recommendations', () => {
     expect(rec.applied).toBe(1);
   });
 });
+
+describe('enrichment_sources', () => {
+  test('add + get round-trips, dedupes on (profile,type,value)', () => {
+    seedProfile(db, { id: 6 });
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'UCsolar', label: 'SolarBalls' });
+    db.addEnrichmentSource({ profile_id: 6, type: 'topic', value: 'space for kids', label: 'Space' });
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'UCsolar', label: 'dup' }); // ignored
+    const all = db.getEnrichmentSources(6);
+    expect(all).toHaveLength(2);
+    expect(db.getEnrichmentChannelIds(6)).toEqual(['UCsolar']);
+    expect(db.getActiveEnrichmentTopics(6).map(t => t.value)).toEqual(['space for kids']);
+  });
+
+  test('inactive sources are excluded from active getters', () => {
+    seedProfile(db, { id: 6 });
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'UCx', label: 'X' });
+    db.getDb().prepare("UPDATE enrichment_sources SET active = 0 WHERE value = 'UCx'").run();
+    expect(db.getEnrichmentChannelIds(6)).toEqual([]);
+    expect(db.getEnrichmentSources(6)).toHaveLength(1); // getEnrichmentSources returns all
+  });
+});
+
+describe('getGamingVideoIds', () => {
+  test('returns only videos carrying a gaming tag', () => {
+    seedProfile(db, { id: 6 });
+    seedVideo(db, { video_id: 'g1', title: 'Minecraft' });
+    seedVideo(db, { video_id: 'g2', title: 'Roblox' });
+    seedVideo(db, { video_id: 'n1', title: 'Peppa' });
+    seedTag(db, 'g1', 'minecraft');
+    seedTag(db, 'g2', 'roblox');
+    seedTag(db, 'n1', 'storytelling');
+    const gaming = db.getGamingVideoIds(['g1', 'g2', 'n1']).sort();
+    expect(gaming).toEqual(['g1', 'g2']);
+  });
+
+  test('empty input returns empty array', () => {
+    expect(db.getGamingVideoIds([])).toEqual([]);
+  });
+});
+
+describe('getRecentWatchedVideoIds', () => {
+  test('returns most-recent distinct watched ids, newest first, capped', () => {
+    seedProfile(db, { id: 6 });
+    seedVideo(db, { video_id: 'a' }); seedVideo(db, { video_id: 'b' }); seedVideo(db, { video_id: 'c' });
+    db.upsertWatchHistory(6, 'a', 10, 100);
+    db.upsertWatchHistory(6, 'b', 10, 100);
+    db.upsertWatchHistory(6, 'c', 10, 100);
+    const ids = db.getRecentWatchedVideoIds(6, 2);
+    expect(ids).toEqual(['c', 'b']);
+  });
+});
+
+describe('getApprovedFeed enrichment visibility', () => {
+  const setWl = (cid, pid, wl) => db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,?)').run(cid, pid, cid, wl);
+  const mkEnrich = (vid, cid) => { seedVideo(db, { video_id: vid, channel_id: cid, title: vid }); db.getDb().prepare("UPDATE videos SET discovery_source='enrichment' WHERE video_id=?").run(vid); };
+
+  test('surfaces approved enrichment videos from non-whitelisted channels, but respects blocks', () => {
+    seedProfile(db, { id: 6 });
+    setWl('wl', 6, 1);                       // whitelisted channel
+    seedVideo(db, { video_id: 'norm', channel_id: 'wl', title: 'norm' });        // normal whitelisted
+    mkEnrich('enr', 'rando');                // enrichment from non-whitelisted channel -> should appear
+    seedVideo(db, { video_id: 'subRando', channel_id: 'rando', title: 'sr' });   // normal video from non-whitelisted -> should NOT appear
+    setWl('blocked', 6, 0);                  // parent-blocked channel
+    mkEnrich('enrBlockedChan', 'blocked');   // enrichment but channel blocked -> should NOT appear
+    mkEnrich('enrBlockedVid', 'rando2');     // enrichment but video-blocked -> should NOT appear
+    db.blockVideo(6, 'enrBlockedVid');
+
+    const ids = db.getApprovedFeed(6, 0, 50, []).map(v => v.video_id);
+    expect(ids).toEqual(expect.arrayContaining(['norm', 'enr']));
+    expect(ids).not.toContain('subRando');
+    expect(ids).not.toContain('enrBlockedChan');
+    expect(ids).not.toContain('enrBlockedVid');
+  });
+});
+
+describe('getEnrichmentCandidates', () => {
+  const setWl = (cid, pid, wl) => db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,?)').run(cid, pid, cid, wl);
+  test('returns non-gaming whitelisted + enrichment videos, excludes gaming and blocks', () => {
+    seedProfile(db, { id: 6 });
+    setWl('wl', 6, 1);
+    seedVideo(db, { video_id: 'ng', channel_id: 'wl', title: 'Oddbods' });           // non-gaming whitelisted -> in
+    seedVideo(db, { video_id: 'gm', channel_id: 'wl', title: 'Minecraft' }); seedTag(db, 'gm', 'minecraft'); // gaming -> out
+    seedVideo(db, { video_id: 'enr', channel_id: 'rando', title: 'Space' });
+    db.getDb().prepare("UPDATE videos SET discovery_source='enrichment' WHERE video_id='enr'").run(); // enrichment non-wl -> in
+    const ids = db.getEnrichmentCandidates(6, 40, []).map(v => v.video_id);
+    expect(ids).toEqual(expect.arrayContaining(['ng', 'enr']));
+    expect(ids).not.toContain('gm');
+  });
+  test('ranks growth (enrichment-source) videos ahead of plain alternatives', () => {
+    seedProfile(db, { id: 6 });
+    setWl('wl', 6, 1);
+    seedVideo(db, { video_id: 'alt', channel_id: 'wl', title: 'Bluey' });
+    seedVideo(db, { video_id: 'grow', channel_id: 'rando', title: 'SolarBalls' });
+    db.getDb().prepare("UPDATE videos SET discovery_source='enrichment' WHERE video_id='grow'").run();
+    const ids = db.getEnrichmentCandidates(6, 40, []).map(v => v.video_id);
+    expect(ids.indexOf('grow')).toBeLessThan(ids.indexOf('alt'));
+  });
+});
+
+describe('getEnrichmentCandidates growth priority', () => {
+  test('enrichment-channel videos rank ahead of plain alternatives even with subscription discovery_source', () => {
+    seedProfile(db, { id: 6 });
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,1)').run('wl', 6, 'wl');
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,1)').run('solar', 6, 'SolarBalls');
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'solar', label: 'SolarBalls' });
+    // plain alternative (whitelisted, non-gaming, subscription)
+    seedVideo(db, { video_id: 'alt', channel_id: 'wl', title: 'Bluey' });
+    // enrichment-CHANNEL video, discovery_source stays 'subscription' (as channel backfill produces)
+    seedVideo(db, { video_id: 'solarvid', channel_id: 'solar', title: 'Planets' });
+    const ids = db.getEnrichmentCandidates(6, 40, []).map(v => v.video_id);
+    expect(ids.indexOf('solarvid')).toBeLessThan(ids.indexOf('alt')); // SolarBalls ranked first
+  });
+});
