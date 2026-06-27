@@ -1534,6 +1534,20 @@ function getGamingVideoIds(videoIds) {
   `).all(...videoIds, ...GAMING_TAGS).map(r => r.video_id);
 }
 
+function getRecentWatchedVideoIds(profileId, limit = 20) {
+  return getDb().prepare(
+    'SELECT video_id FROM watch_history WHERE profile_id = ? ORDER BY watched_at DESC, id DESC LIMIT ?'
+  ).all(profileId, limit).map(r => r.video_id);
+}
+
+function countTaggedVideos(videoIds) {
+  if (!videoIds || videoIds.length === 0) return 0;
+  const ph = videoIds.map(() => '?').join(',');
+  return getDb().prepare(
+    `SELECT COUNT(DISTINCT video_id) AS n FROM video_tags WHERE video_id IN (${ph})`
+  ).all(...videoIds)[0].n;
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -1611,4 +1625,6 @@ module.exports = {
   getActiveEnrichmentTopics,
   getEnrichmentChannelIds,
   getGamingVideoIds,
+  getRecentWatchedVideoIds,
+  countTaggedVideos,
 };

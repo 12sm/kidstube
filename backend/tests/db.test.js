@@ -435,3 +435,15 @@ describe('getGamingVideoIds', () => {
     expect(db.getGamingVideoIds([])).toEqual([]);
   });
 });
+
+describe('getRecentWatchedVideoIds', () => {
+  test('returns most-recent distinct watched ids, newest first, capped', () => {
+    seedProfile(db, { id: 6 });
+    seedVideo(db, { video_id: 'a' }); seedVideo(db, { video_id: 'b' }); seedVideo(db, { video_id: 'c' });
+    db.upsertWatchHistory(6, 'a', 10, 100);
+    db.upsertWatchHistory(6, 'b', 10, 100);
+    db.upsertWatchHistory(6, 'c', 10, 100);
+    const ids = db.getRecentWatchedVideoIds(6, 2);
+    expect(ids).toEqual(['c', 'b']);
+  });
+});
