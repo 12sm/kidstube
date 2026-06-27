@@ -1,5 +1,8 @@
 const { google } = require('googleapis');
+const axios = require('axios');
 const auth = require('./auth');
+
+const INVIDIOUS_URL = process.env.INVIDIOUS_URL || 'http://invidious:3000';
 
 // Get subscriptions for a profile
 async function getSubscriptions(profileId) {
@@ -200,6 +203,36 @@ function parseTopicCategories(topicCategories) {
     .filter(Boolean);
 }
 
+// Quota-free search fallback via the local Invidious instance. Maps Invidious'
+// /api/v1/search response to the same video shape searchVideos returns.
+async function searchVideosInvidious(query, maxResults = 20) {
+  try {
+    const res = await axios.get(`${INVIDIOUS_URL}/api/v1/search`, {
+      params: { q: query, type: 'video', page: 1 },
+      timeout: 8000,
+    });
+    const items = Array.isArray(res.data) ? res.data : [];
+    return items
+      .filter(it => it.type === 'video' && it.videoId)
+      .slice(0, maxResults)
+      .map(it => ({
+        video_id:         it.videoId,
+        title:            it.title,
+        channel_id:       it.authorId,
+        channel_name:     it.author,
+        thumbnail_url:    (it.videoThumbnails || []).find(t => t.quality === 'medium')?.url
+                          || (it.videoThumbnails || [])[0]?.url || null,
+        description:      it.description || null,
+        published_at:     it.published ? new Date(it.published * 1000).toISOString() : null,
+        duration_seconds: it.lengthSeconds ?? null,
+        is_live:          it.liveNow === true,
+      }));
+  } catch (err) {
+    console.error('[Invidious] search failed:', err.message);
+    return [];
+  }
+}
+
 async function searchVideos(query, { channelIds, maxResults = 20, open = false } = {}) {
   if (!process.env.YOUTUBE_API_KEY || !query) return [];
 
@@ -248,6 +281,10 @@ async function searchVideos(query, { channelIds, maxResults = 20, open = false }
       }));
   } catch (err) {
     console.error('[YouTube] searchVideos failed:', err.message);
+    if (open) {
+      console.log('[YouTube] falling back to Invidious search (quota/error)');
+      return searchVideosInvidious(query, maxResults);
+    }
     return [];
   }
 }
@@ -326,5 +363,6 @@ module.exports = {
   resolveChannelByUrl,
   parseTopicCategories,
   searchVideos,
+  searchVideosInvidious,
   discoverChannels,
 };
