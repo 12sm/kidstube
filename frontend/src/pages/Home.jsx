@@ -51,7 +51,6 @@ export default function Home() {
   const { profileId, profileName, clearProfile } = useContext(ProfileContext);
   const navigate = useNavigate();
   const [videos, setVideos]                 = useState([]);
-  const [page, setPage]                     = useState(0);
   const [hasMore, setHasMore]               = useState(true);
   const [loading, setLoading]               = useState(false);
   const [initialLoad, setInitialLoad]       = useState(true);
@@ -59,6 +58,7 @@ export default function Home() {
   const [watchHistoryMap, setWatchHistoryMap] = useState({});
   const [pullY, setPullY]                   = useState(0);
   const [refreshing, setRefreshing]         = useState(false);
+  const seenIdsRef     = useRef(new Set());  // tracks all video_ids shown this session
   const pullStartY     = useRef(0);
   const isPulling      = useRef(false);
   const refreshingRef  = useRef(false);   // readable inside passive:false listeners
@@ -85,19 +85,21 @@ export default function Home() {
     if (loading || !hasMore || !profileId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/feed/${profileId}?page=${page}&limit=18`);
+      const seenParam = [...seenIdsRef.current].join(',');
+      const url = `/api/feed/${profileId}?limit=18${seenParam ? `&seen=${seenParam}` : ''}`;
+      const res = await fetch(url);
       const data = await res.json();
       const newVideos = shuffle(data.videos || []);
+      newVideos.forEach(v => seenIdsRef.current.add(v.video_id));
       setVideos(prev => [...prev, ...newVideos]);
       setHasMore(newVideos.length === 18);
-      setPage(prev => prev + 1);
     } catch {
       setHasMore(false);
     } finally {
       setLoading(false);
       setInitialLoad(false);
     }
-  }, [profileId, page, loading, hasMore]);
+  }, [profileId, loading, hasMore]);
 
   useEffect(() => {
     if (profileId) loadFeed();
@@ -133,12 +135,14 @@ export default function Home() {
     refreshingRef.current = true;
     setRefreshing(true);
     haptic('medium');
-    setVideos([]); setPage(0); setHasMore(true); setInitialLoad(true);
+    seenIdsRef.current = new Set();
+    setVideos([]); setHasMore(true); setInitialLoad(true);
     try {
-      const res = await fetch(`/api/feed/${profileId}?page=0&limit=18`);
+      const res = await fetch(`/api/feed/${profileId}?limit=18`);
       const data = await res.json();
       const newVideos = shuffle(data.videos || []);
-      setVideos(newVideos); setHasMore(newVideos.length === 18); setPage(1);
+      newVideos.forEach(v => seenIdsRef.current.add(v.video_id));
+      setVideos(newVideos); setHasMore(newVideos.length === 18);
     } catch { /* ignore */ }
     setInitialLoad(false);
     setRefreshing(false);

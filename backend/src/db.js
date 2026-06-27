@@ -473,13 +473,14 @@ function updateVideoStatus(videoId, status, rejectionReason = null) {
   ).run(status, rejectionReason, videoId);
 }
 
-function getApprovedFeed(profileId, page = 0, limit = 20) {
+function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
   const channels = getWhitelistedChannels(profileId);
   if (channels.length === 0) return [];
 
   const channelIds = channels.map(c => c.channel_id);
   const placeholders = channelIds.map(() => '?').join(',');
   const offset = page * limit;
+  const excludePlaceholders = excludeIds.length ? excludeIds.map(() => '?').join(',') : null;
 
   return getDb().prepare(`
     WITH raw_interests AS (
@@ -550,6 +551,7 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
       AND v.video_id NOT IN (
         SELECT video_id FROM video_tags WHERE tag IN (SELECT tag FROM zeroed_tags)
       )
+      ${excludePlaceholders ? `AND v.video_id NOT IN (${excludePlaceholders})` : ''}
     ORDER BY
       (COALESCE(int_scores.interest_score, 0.5)
         + CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 1.0 ELSE 0.0 END)
@@ -557,7 +559,7 @@ function getApprovedFeed(profileId, page = 0, limit = 20) {
       * (0.7 + 0.3 * (ABS(RANDOM()) / 9223372036854775807.0))
       DESC
     LIMIT ? OFFSET ?
-  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, limit, offset]);
+  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, ...excludeIds, limit, offset]);
 }
 
 function blockVideo(profileId, videoId) {

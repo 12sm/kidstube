@@ -166,13 +166,14 @@ app.get('/api/profiles', (req, res) => {
 // Get approved video feed for a profile
 app.get('/api/feed/:profileId', (req, res) => {
   const profileId = parseInt(req.params.profileId);
-  const page = parseInt(req.query.page) || 0;
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+  const seenIds = req.query.seen
+    ? req.query.seen.split(',').map(s => s.trim()).filter(Boolean).slice(0, 500)
+    : [];
 
   // Fetch a larger pool so the channel-diversity filter has enough to work with.
-  // ORDER BY is random each call so page offset isn't meaningful — each call
-  // returns a fresh random slice, which is fine for infinite-scroll on a 5k+ library.
-  const raw = db.getApprovedFeed(profileId, 0, limit * 5);
+  // Exclude already-seen IDs so load-more never repeats.
+  const raw = db.getApprovedFeed(profileId, 0, limit * 5, seenIds);
 
   // Cap at 2 videos per channel per page so no single channel dominates
   const channelCount = new Map();
@@ -186,7 +187,7 @@ app.get('/api/feed/:profileId', (req, res) => {
     if (videos.length >= limit) break;
   }
 
-  res.json({ videos, page, limit });
+  res.json({ videos, limit });
 });
 
 // Get approved videos for a specific channel
