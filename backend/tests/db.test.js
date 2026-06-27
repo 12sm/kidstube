@@ -417,3 +417,21 @@ describe('enrichment_sources', () => {
     expect(db.getEnrichmentSources(6)).toHaveLength(1); // getEnrichmentSources returns all
   });
 });
+
+describe('getGamingVideoIds', () => {
+  test('returns only videos carrying a gaming tag', () => {
+    seedProfile(db, { id: 6 });
+    seedVideo(db, { video_id: 'g1', title: 'Minecraft' });
+    seedVideo(db, { video_id: 'g2', title: 'Roblox' });
+    seedVideo(db, { video_id: 'n1', title: 'Peppa' });
+    seedTag(db, 'g1', 'minecraft');
+    seedTag(db, 'g2', 'roblox');
+    seedTag(db, 'n1', 'storytelling');
+    const gaming = db.getGamingVideoIds(['g1', 'g2', 'n1']).sort();
+    expect(gaming).toEqual(['g1', 'g2']);
+  });
+
+  test('empty input returns empty array', () => {
+    expect(db.getGamingVideoIds([])).toEqual([]);
+  });
+});

@@ -2,6 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { normalizeTag, normalizeTags, CANONICAL_TAGS, ALIAS_MAP, TAG_CATEGORIES, TAG_TO_CATEGORY } = require('./tags');
+const { GAMING_TAGS } = require('./feedConstants');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'kidstube.db');
 
@@ -1521,6 +1522,18 @@ function getFeedPreview(profileId, overrides = {}, ceilingOverride = null) {
   return result;
 }
 
+// --- Adaptive feed enrichment helpers ---
+
+function getGamingVideoIds(videoIds) {
+  if (!videoIds || videoIds.length === 0) return [];
+  const vidPh = videoIds.map(() => '?').join(',');
+  const tagPh = GAMING_TAGS.map(() => '?').join(',');
+  return getDb().prepare(`
+    SELECT DISTINCT video_id FROM video_tags
+    WHERE video_id IN (${vidPh}) AND tag IN (${tagPh})
+  `).all(...videoIds, ...GAMING_TAGS).map(r => r.video_id);
+}
+
 module.exports = {
   getDb,
   migrate,
@@ -1597,4 +1610,5 @@ module.exports = {
   getEnrichmentSources,
   getActiveEnrichmentTopics,
   getEnrichmentChannelIds,
+  getGamingVideoIds,
 };
