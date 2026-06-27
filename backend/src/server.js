@@ -22,6 +22,7 @@ const path       = require('path');
 const jobDryRun  = require('./jobDryRun');
 const dietMonitor = require('./dietMonitor');
 const feedComposer = require('./feedComposer');
+const feedC = require('./feedConstants');
 
 
 const crypto = require('crypto');
@@ -179,11 +180,16 @@ app.get('/api/feed/:profileId', (req, res) => {
 
   // Classify the pool and compose with adaptive enrichment.
   const enrichmentInfo = dietMonitor.getEnrichmentRatio(profileId);
-  const poolIds = raw.map(v => v.video_id);
+  // Guarantee enrichment candidates are present: getApprovedFeed's gaming-dominated
+  // score can leave zero non-gaming videos in the top slice, starving the composer.
+  const enrichmentPool = db.getEnrichmentCandidates(profileId, limit * feedC.ENRICHMENT_POOL_FACTOR, seenIds);
+  const seenInRaw = new Set(raw.map(v => v.video_id));
+  const pool = [...raw, ...enrichmentPool.filter(v => !seenInRaw.has(v.video_id))];
+  const poolIds = pool.map(v => v.video_id);
   const gamingSet = new Set(db.getGamingVideoIds(poolIds));
   const growthChannels = new Set(db.getEnrichmentChannelIds(profileId));
 
-  const videos = feedComposer.composeFeed(raw, {
+  const videos = feedComposer.composeFeed(pool, {
     ratio: enrichmentInfo.ratio,
     limit,
     isGaming: v => gamingSet.has(v.video_id),

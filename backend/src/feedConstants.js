@@ -8,4 +8,5 @@ module.exports = {
   DIET_MIN_TAGGED:     5,      // min tagged videos in window for a valid signal
   GROWTH_MIN_PER_PAGE: 2,      // guaranteed growth-source picks per page when available
   GAMING_TAGS: ['gaming', 'minecraft', 'roblox', 'minecraft-roleplay', 'gaming-challenge'],
+  ENRICHMENT_POOL_FACTOR: 2,   // fetch limit*FACTOR enrichment candidates to guarantee supply
 };

@@ -577,6 +577,41 @@ function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
   `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, profileId, ...excludeIds, limit, offset]);
 }
 
+// Top non-gaming + growth videos for a profile, block-aware. Used to guarantee
+// the feed pool contains enrichment candidates even when the gaming-dominated
+// interest score would otherwise crowd them all out. Growth (enrichment-source)
+// videos rank first, then fresh, then randomized for variety.
+function getEnrichmentCandidates(profileId, limit = 40, excludeIds = []) {
+  const channels = getWhitelistedChannels(profileId);
+  const channelIds = channels.map(c => c.channel_id);
+  const chPh = channelIds.length ? channelIds.map(() => '?').join(',') : null;
+  const exPh = excludeIds.length ? excludeIds.map(() => '?').join(',') : null;
+  const tagPh = GAMING_TAGS.map(() => '?').join(',');
+  return getDb().prepare(`
+    SELECT v.*, c.thumbnail_url AS channel_thumbnail_img
+    FROM videos v
+    LEFT JOIN (SELECT channel_id, thumbnail_url FROM channels GROUP BY channel_id) c
+      ON v.channel_id = c.channel_id
+    WHERE v.status = 'approved'
+      AND (${chPh ? `v.channel_id IN (${chPh}) OR ` : ''}v.discovery_source = 'enrichment')
+      AND v.channel_id NOT IN (
+        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 0
+      )
+      AND v.video_id NOT IN (
+        SELECT value FROM filter_rules WHERE rule_type = 'video_block' AND (profile_id = ? OR profile_id IS NULL)
+      )
+      AND v.video_id NOT IN (
+        SELECT video_id FROM video_tags WHERE tag IN (${tagPh})
+      )
+      ${exPh ? `AND v.video_id NOT IN (${exPh})` : ''}
+    ORDER BY
+      CASE WHEN v.discovery_source = 'enrichment' THEN 0 ELSE 1 END,
+      CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 0 ELSE 1 END,
+      ABS(RANDOM())
+    LIMIT ?
+  `).all(...channelIds, profileId, profileId, ...GAMING_TAGS, ...excludeIds, limit);
+}
+
 function blockVideo(profileId, videoId) {
   getDb().prepare(
     `INSERT OR IGNORE INTO filter_rules (profile_id, rule_type, value, scope)
@@ -1626,6 +1661,7 @@ module.exports = {
   addEnrichmentSource,
   getEnrichmentSources,
   getActiveEnrichmentTopics,
+  getEnrichmentCandidates,
   getEnrichmentChannelIds,
   getGamingVideoIds,
   getRecentWatchedVideoIds,
