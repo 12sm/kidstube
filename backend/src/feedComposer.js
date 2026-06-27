@@ -31,16 +31,12 @@ function composeFeed(pool, opts) {
   const enrichmentPicks = [...guaranteedGrowth, ...alternatives, ...remainingGrowth]
     .slice(0, enrichmentSlots);
 
-  // Targets: enrichment up to enrichmentSlots, gaming fills the rest. Thin
-  // enrichment is backfilled by gaming below.
-  const gamingTarget = limit - enrichmentPicks.length;
-
   // Interleave: walk the page positions, placing an enrichment pick at evenly
   // spaced slots, gaming otherwise. Channel cap applied as we go; if a pick is
   // capped out, fall through to the other bucket.
   const result = [];
   const channelCount = new Map();
-  let gi = 0, ei = 0;
+  let ei = 0;
   const canPlace = (v) => (channelCount.get(v.channel_id) || 0) < perChannelCap;
   const place = (v) => {
     result.push(v);
@@ -62,10 +58,23 @@ function composeFeed(pool, opts) {
       Math.floor(pos / enrichStride) >= ei;
     let v = null;
     if (wantEnrich) { v = nextFrom(enrichmentPicks, eRef); if (v) ei++; }
-    if (!v) { v = nextFrom(gaming, gRef); if (v) gi++; }
+    if (!v) { v = nextFrom(gaming, gRef); }
     if (!v) { v = nextFrom(enrichmentPicks, eRef); if (v) ei++; } // enrichment backfill
     if (!v) break; // pool exhausted under channel cap
     place(v);
+  }
+
+  // Backfill to a full page from any remaining pool videos (in score order),
+  // honoring the channel cap. Prevents a short page when one bucket is
+  // channel-capped but other eligible videos remain in the pool.
+  if (result.length < limit) {
+    const placed = new Set(result.map(v => v.video_id));
+    for (const v of pool) {
+      if (result.length >= limit) break;
+      if (placed.has(v.video_id) || !canPlace(v)) continue;
+      place(v);
+      placed.add(v.video_id);
+    }
   }
 
   return result;

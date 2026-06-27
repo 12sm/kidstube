@@ -49,3 +49,13 @@ test('preserves input order within the gaming bucket', () => {
   const out = composeFeed(pool, { ratio: 0, limit: 3, isGaming, isGrowth, growthMinPerPage: 0 });
   expect(out.map(v => v.video_id)).toEqual(['g0', 'g1', 'g2']);
 });
+
+test('fills a full page when gaming is channel-capped but enrichment remains', () => {
+  const pool = [
+    ...Array.from({ length: 10 }, (_, i) => vid('g' + i, 'SAME')), // all gaming, one channel
+    ...Array.from({ length: 10 }, (_, i) => vid('e' + i, 'ec' + i)), // abundant enrichment
+  ];
+  const out = composeFeed(pool, { ratio: 0.2, limit: 10, isGaming, isGrowth, perChannelCap: 2, growthMinPerPage: 0 });
+  expect(out).toHaveLength(10); // not short — extra enrichment backfills past the ratio budget
+  expect(out.filter(v => v.channel_id === 'SAME').length).toBeLessThanOrEqual(2);
+});
