@@ -162,6 +162,17 @@ function migrate() {
       UNIQUE(profile_id, query)
     );
     CREATE INDEX IF NOT EXISTS idx_search_queries_profile ON search_queries(profile_id, searched_at DESC);
+
+    CREATE TABLE IF NOT EXISTS enrichment_sources (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+      type        TEXT NOT NULL,
+      value       TEXT NOT NULL,
+      label       TEXT,
+      active      INTEGER NOT NULL DEFAULT 1,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(profile_id, type, value)
+    );
   `);
 
   // Fix videos.channel_id FK — channel_id is no longer a unique key in channels after composite-key migration
@@ -1195,6 +1206,33 @@ function getSearchSuggestions(profileId, q) {
   return [...channelRows, ...titleRows];
 }
 
+// --- Enrichment sources ---
+
+function addEnrichmentSource({ profile_id, type, value, label = null }) {
+  getDb().prepare(`
+    INSERT OR IGNORE INTO enrichment_sources (profile_id, type, value, label)
+    VALUES (?, ?, ?, ?)
+  `).run(profile_id, type, value, label);
+}
+
+function getEnrichmentSources(profileId) {
+  return getDb().prepare(
+    'SELECT id, profile_id, type, value, label, active, created_at FROM enrichment_sources WHERE profile_id = ? ORDER BY type, label'
+  ).all(profileId);
+}
+
+function getActiveEnrichmentTopics(profileId) {
+  return getDb().prepare(
+    "SELECT value, label FROM enrichment_sources WHERE profile_id = ? AND type = 'topic' AND active = 1"
+  ).all(profileId);
+}
+
+function getEnrichmentChannelIds(profileId) {
+  return getDb().prepare(
+    "SELECT value FROM enrichment_sources WHERE profile_id = ? AND type = 'channel' AND active = 1"
+  ).all(profileId).map(r => r.value);
+}
+
 // Bulk apply: if channelIds provided applies only those, otherwise applies all actionable pending recs.
 function getApprovedVideoCountByChannel(channelIds) {
   if (!channelIds || channelIds.length === 0) return {};
@@ -1555,4 +1593,8 @@ module.exports = {
   deleteSearchQuery,
   searchApprovedVideos,
   getSearchSuggestions,
+  addEnrichmentSource,
+  getEnrichmentSources,
+  getActiveEnrichmentTopics,
+  getEnrichmentChannelIds,
 };

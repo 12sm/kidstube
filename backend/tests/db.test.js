@@ -396,3 +396,24 @@ describe('channel_recommendations', () => {
     expect(rec.applied).toBe(1);
   });
 });
+
+describe('enrichment_sources', () => {
+  test('add + get round-trips, dedupes on (profile,type,value)', () => {
+    seedProfile(db, { id: 6 });
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'UCsolar', label: 'SolarBalls' });
+    db.addEnrichmentSource({ profile_id: 6, type: 'topic', value: 'space for kids', label: 'Space' });
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'UCsolar', label: 'dup' }); // ignored
+    const all = db.getEnrichmentSources(6);
+    expect(all).toHaveLength(2);
+    expect(db.getEnrichmentChannelIds(6)).toEqual(['UCsolar']);
+    expect(db.getActiveEnrichmentTopics(6).map(t => t.value)).toEqual(['space for kids']);
+  });
+
+  test('inactive sources are excluded from active getters', () => {
+    seedProfile(db, { id: 6 });
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'UCx', label: 'X' });
+    db.getDb().prepare("UPDATE enrichment_sources SET active = 0 WHERE value = 'UCx'").run();
+    expect(db.getEnrichmentChannelIds(6)).toEqual([]);
+    expect(db.getEnrichmentSources(6)).toHaveLength(1); // getEnrichmentSources returns all
+  });
+});
