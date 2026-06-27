@@ -20,6 +20,8 @@ const dash = require('./dash');
 const { spawn } = require('child_process');
 const path       = require('path');
 const jobDryRun  = require('./jobDryRun');
+const dietMonitor = require('./dietMonitor');
+const feedComposer = require('./feedComposer');
 
 
 const crypto = require('crypto');
@@ -171,23 +173,26 @@ app.get('/api/feed/:profileId', (req, res) => {
     ? req.query.seen.split(',').map(s => s.trim()).filter(Boolean).slice(0, 500)
     : [];
 
-  // Fetch a larger pool so the channel-diversity filter has enough to work with.
-  // Exclude already-seen IDs so load-more never repeats.
+  // Fetch a larger pool so the composer has room to interleave. Exclude
+  // already-seen IDs so load-more never repeats (seen-exclusion stays in SQL).
   const raw = db.getApprovedFeed(profileId, 0, limit * 5, seenIds);
 
-  // Cap at 2 videos per channel per page so no single channel dominates
-  const channelCount = new Map();
-  const videos = [];
-  for (const v of raw) {
-    const n = channelCount.get(v.channel_id) || 0;
-    if (n < 2) {
-      videos.push(v);
-      channelCount.set(v.channel_id, n + 1);
-    }
-    if (videos.length >= limit) break;
-  }
+  // Classify the pool and compose with adaptive enrichment.
+  const enrichmentInfo = dietMonitor.getEnrichmentRatio(profileId);
+  const poolIds = raw.map(v => v.video_id);
+  const gamingSet = new Set(db.getGamingVideoIds(poolIds));
+  const growthChannels = new Set(db.getEnrichmentChannelIds(profileId));
 
-  res.json({ videos, limit });
+  const videos = feedComposer.composeFeed(raw, {
+    ratio: enrichmentInfo.ratio,
+    limit,
+    isGaming: v => gamingSet.has(v.video_id),
+    isGrowth: v => v.discovery_source === 'enrichment' || growthChannels.has(v.channel_id),
+    perChannelCap: 2,
+  });
+
+  console.log(`[Feed] profile=${profileId} ratio=${enrichmentInfo.ratio.toFixed(2)} gaming=${enrichmentInfo.gamingFraction.toFixed(2)} window=${enrichmentInfo.windowSize}`);
+  res.json({ videos, limit, enrichment: enrichmentInfo });
 });
 
 // Get approved videos for a specific channel
