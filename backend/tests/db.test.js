@@ -447,3 +447,26 @@ describe('getRecentWatchedVideoIds', () => {
     expect(ids).toEqual(['c', 'b']);
   });
 });
+
+describe('getApprovedFeed enrichment visibility', () => {
+  const setWl = (cid, pid, wl) => db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,?)').run(cid, pid, cid, wl);
+  const mkEnrich = (vid, cid) => { seedVideo(db, { video_id: vid, channel_id: cid, title: vid }); db.getDb().prepare("UPDATE videos SET discovery_source='enrichment' WHERE video_id=?").run(vid); };
+
+  test('surfaces approved enrichment videos from non-whitelisted channels, but respects blocks', () => {
+    seedProfile(db, { id: 6 });
+    setWl('wl', 6, 1);                       // whitelisted channel
+    seedVideo(db, { video_id: 'norm', channel_id: 'wl', title: 'norm' });        // normal whitelisted
+    mkEnrich('enr', 'rando');                // enrichment from non-whitelisted channel -> should appear
+    seedVideo(db, { video_id: 'subRando', channel_id: 'rando', title: 'sr' });   // normal video from non-whitelisted -> should NOT appear
+    setWl('blocked', 6, 0);                  // parent-blocked channel
+    mkEnrich('enrBlockedChan', 'blocked');   // enrichment but channel blocked -> should NOT appear
+    mkEnrich('enrBlockedVid', 'rando2');     // enrichment but video-blocked -> should NOT appear
+    db.blockVideo(6, 'enrBlockedVid');
+
+    const ids = db.getApprovedFeed(6, 0, 50, []).map(v => v.video_id);
+    expect(ids).toEqual(expect.arrayContaining(['norm', 'enr']));
+    expect(ids).not.toContain('subRando');
+    expect(ids).not.toContain('enrBlockedChan');
+    expect(ids).not.toContain('enrBlockedVid');
+  });
+});

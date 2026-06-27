@@ -553,8 +553,11 @@ function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
       ON v.channel_id = c.channel_id
     LEFT JOIN int_scores ON v.video_id = int_scores.video_id
     LEFT JOIN watch_comp ON v.video_id = watch_comp.video_id
-    WHERE v.channel_id IN (${placeholders})
+    WHERE (v.channel_id IN (${placeholders}) OR v.discovery_source = 'enrichment')
       AND v.status = 'approved'
+      AND v.channel_id NOT IN (
+        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 0
+      )
       AND v.video_id NOT IN (
         SELECT value FROM filter_rules
         WHERE rule_type = 'video_block'
@@ -571,7 +574,7 @@ function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
       * (0.7 + 0.3 * (ABS(RANDOM()) / 9223372036854775807.0))
       DESC
     LIMIT ? OFFSET ?
-  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, ...excludeIds, limit, offset]);
+  `).all([profileId, profileId, profileId, profileId, profileId, ...channelIds, profileId, profileId, ...excludeIds, limit, offset]);
 }
 
 function blockVideo(profileId, videoId) {
