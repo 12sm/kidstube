@@ -584,9 +584,11 @@ function getApprovedFeed(profileId, page = 0, limit = 20, excludeIds = []) {
 function getEnrichmentCandidates(profileId, limit = 40, excludeIds = []) {
   const channels = getWhitelistedChannels(profileId);
   const channelIds = channels.map(c => c.channel_id);
+  const enrichChannelIds = getEnrichmentChannelIds(profileId);
   const chPh = channelIds.length ? channelIds.map(() => '?').join(',') : null;
   const exPh = excludeIds.length ? excludeIds.map(() => '?').join(',') : null;
   const tagPh = GAMING_TAGS.map(() => '?').join(',');
+  const enrPh = enrichChannelIds.length ? enrichChannelIds.map(() => '?').join(',') : null;
   return getDb().prepare(`
     SELECT v.*, c.thumbnail_url AS channel_thumbnail_img
     FROM videos v
@@ -605,11 +607,11 @@ function getEnrichmentCandidates(profileId, limit = 40, excludeIds = []) {
       )
       ${exPh ? `AND v.video_id NOT IN (${exPh})` : ''}
     ORDER BY
-      CASE WHEN v.discovery_source = 'enrichment' THEN 0 ELSE 1 END,
+      CASE WHEN v.discovery_source = 'enrichment'${enrPh ? ` OR v.channel_id IN (${enrPh})` : ''} THEN 0 ELSE 1 END,
       CASE WHEN v.processed_at > datetime('now', '-60 days') THEN 0 ELSE 1 END,
       ABS(RANDOM())
     LIMIT ?
-  `).all(...channelIds, profileId, profileId, ...GAMING_TAGS, ...excludeIds, limit);
+  `).all(...channelIds, profileId, profileId, ...GAMING_TAGS, ...excludeIds, ...enrichChannelIds, limit);
 }
 
 function blockVideo(profileId, videoId) {

@@ -494,3 +494,18 @@ describe('getEnrichmentCandidates', () => {
     expect(ids.indexOf('grow')).toBeLessThan(ids.indexOf('alt'));
   });
 });
+
+describe('getEnrichmentCandidates growth priority', () => {
+  test('enrichment-channel videos rank ahead of plain alternatives even with subscription discovery_source', () => {
+    seedProfile(db, { id: 6 });
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,1)').run('wl', 6, 'wl');
+    db.getDb().prepare('INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,1)').run('solar', 6, 'SolarBalls');
+    db.addEnrichmentSource({ profile_id: 6, type: 'channel', value: 'solar', label: 'SolarBalls' });
+    // plain alternative (whitelisted, non-gaming, subscription)
+    seedVideo(db, { video_id: 'alt', channel_id: 'wl', title: 'Bluey' });
+    // enrichment-CHANNEL video, discovery_source stays 'subscription' (as channel backfill produces)
+    seedVideo(db, { video_id: 'solarvid', channel_id: 'solar', title: 'Planets' });
+    const ids = db.getEnrichmentCandidates(6, 40, []).map(v => v.video_id);
+    expect(ids.indexOf('solarvid')).toBeLessThan(ids.indexOf('alt')); // SolarBalls ranked first
+  });
+});
