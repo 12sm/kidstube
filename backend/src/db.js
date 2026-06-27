@@ -1150,23 +1150,51 @@ function deleteSearchQuery(profileId, query) {
 }
 
 function searchApprovedVideos(profileId, q) {
-  const like = `%${q}%`;
+  const phrase = `%${q}%`;
+  // Search the FULL local approved library, not just whitelisted channels.
+  // Every approved video was already vetted at discovery time (keyword/LLM
+  // filter), and search is an explicit, parent-curated surface — so the ~1.4k
+  // search-discovered videos that live outside the feed's whitelisted channels
+  // should be findable here. This also makes search work when the live YouTube
+  // Search API quota is exhausted, which it routinely is on heavy days.
+  //
+  // Matching is per-word (every token must appear somewhere in title/channel/
+  // description), not whole-phrase. Kids' voice searches like "JJ sitter" should
+  // still find "Maizen JJ Babysitter" — a literal '%JJ sitter%' substring never
+  // would. Whole-phrase title hits are still ranked first.
+  //
+  // We honor the parent's per-profile guards: channels they explicitly blocked
+  // (whitelisted = 0) and individual video_block rules are excluded. Whitelisted-
+  // channel hits are ranked ahead of the broader library.
+  const tokens = q.split(/\s+/).filter(Boolean).slice(0, 8);
+  const tokenClauses = tokens
+    .map(() => '(v.title LIKE ? OR v.channel_name LIKE ? OR v.description LIKE ?)')
+    .join(' AND ');
+  const tokenParams = tokens.flatMap(t => { const l = `%${t}%`; return [l, l, l]; });
+
   return getDb().prepare(`
     SELECT v.video_id, v.title, v.channel_id, v.channel_name, v.thumbnail_url,
            v.duration_seconds, v.published_at
     FROM videos v
     WHERE v.status = 'approved'
-      AND v.channel_id IN (
-        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1
+      AND (${tokenClauses || '1=1'})
+      AND v.channel_id NOT IN (
+        SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 0
       )
-      AND (v.title LIKE ? OR v.channel_name LIKE ? OR v.description LIKE ?)
+      AND v.video_id NOT IN (
+        SELECT value FROM filter_rules
+        WHERE rule_type = 'video_block' AND (profile_id = ? OR profile_id IS NULL)
+      )
     ORDER BY
+      CASE WHEN v.channel_id IN (
+             SELECT channel_id FROM channels WHERE profile_id = ? AND whitelisted = 1
+           ) THEN 0 ELSE 1 END,
       CASE WHEN v.title LIKE ? THEN 0
            WHEN v.channel_name LIKE ? THEN 1
            ELSE 2 END,
       v.published_at DESC
-    LIMIT 20
-  `).all(profileId, like, like, like, like, like);
+    LIMIT 40
+  `).all(...tokenParams, profileId, profileId, profileId, phrase, phrase);
 }
 
 // Lightweight suggestions for as-you-type autocomplete.

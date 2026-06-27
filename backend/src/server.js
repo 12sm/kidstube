@@ -483,16 +483,35 @@ app.get('/api/search', async (req, res) => {
   // Save to search history (with raw speech if voice search)
   db.saveSearchQuery(profileId, q, rawSpeech);
 
-  // 1. Search approved library (whitelisted channels)
+  // 1. Search the full local approved library first (block-aware, whitelist-first)
   const dbResults = db.searchApprovedVideos(profileId, q);
 
-  // 2. Always supplement with open YouTube search
+  // 2. Supplement with open YouTube search ONLY when the local library is thin.
+  // The YouTube Search API costs 100 quota units/call against a ~10k/day budget
+  // (~100 searches/day for the whole household), so calling it on every search —
+  // including the repeats that the local library already answers well — exhausts
+  // the quota by mid-day and then ALL search silently falls back to local only.
+  // Skipping the call when we already have enough local hits keeps the quota for
+  // the genuinely new/sparse queries that actually need fresh discovery.
+  const LOCAL_RESULT_TARGET = 12;
   let apiResults = [];
   const filterRules = db.getFilterRules(profileId);
-  const apiVideos   = await youtube.searchVideos(q, { open: true, maxResults: 20 });
+  const apiVideos   = dbResults.length >= LOCAL_RESULT_TARGET
+    ? []
+    : await youtube.searchVideos(q, { open: true, maxResults: 20 });
 
   for (const video of apiVideos) {
-    if (db.videoExists(video.video_id)) continue;
+    // Already in the DB from a prior search/pipeline run: re-surface it if it
+    // was approved, otherwise respect its existing status (rejected/pending).
+    // Previously this `continue`d unconditionally, so repeat ("saved") searches
+    // dropped every already-known result — and since most search-discovered
+    // videos live outside the whitelisted channels that searchApprovedVideos
+    // covers, they never came back, collapsing repeat searches to near-zero.
+    const existing = db.getVideoById(video.video_id);
+    if (existing) {
+      if (existing.status === 'approved') apiResults.push(existing);
+      continue;
+    }
     if (filter.isShort(video) || filter.isLive(video)) continue;
     const filterResult = filter.runFilterPass(video, filterRules);
     if (filterResult.rejected) continue;
@@ -511,7 +530,7 @@ app.get('/api/search', async (req, res) => {
     apiResults.push(video);
   }
 
-  // Merge: whitelisted DB hits first, then open YouTube results, deduped
+  // Merge: local library hits first, then any new open-YouTube results, deduped
   const seen = new Set(dbResults.map(v => v.video_id));
   const merged = [
     ...dbResults,

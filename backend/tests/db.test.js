@@ -396,3 +396,58 @@ describe('channel_recommendations', () => {
     expect(rec.applied).toBe(1);
   });
 });
+
+// searchApprovedVideos — full-library, block-aware, per-word search
+// Regression coverage for the search fix: repeat/off-whitelist searches must
+// return results from the local approved library even without the live API.
+describe('searchApprovedVideos', () => {
+  const wl = (channelId, profileId, name, whitelisted) =>
+    db.getDb().prepare(
+      'INSERT OR IGNORE INTO channels (channel_id, profile_id, channel_name, whitelisted) VALUES (?,?,?,?)'
+    ).run(channelId, profileId, name, whitelisted);
+
+  test('finds an approved video whose channel is NOT whitelisted (the core fix)', () => {
+    seedProfile(db, { id: 5 });
+    // search-discovered video, channel has no row in channels at all
+    seedVideo(db, { video_id: 'v1', channel_id: 'chX', channel_name: 'Maizen', title: 'JJ Babysitter Adventure' });
+    const out = db.searchApprovedVideos(5, 'Babysitter');
+    expect(out.map(v => v.video_id)).toContain('v1');
+  });
+
+  test('per-word matching: "JJ sitter" matches "Maizen JJ Babysitter"', () => {
+    seedProfile(db, { id: 5 });
+    seedVideo(db, { video_id: 'v1', channel_id: 'chX', channel_name: 'Maizen', title: 'Maizen JJ Babysitter' });
+    expect(db.searchApprovedVideos(5, 'JJ sitter').map(v => v.video_id)).toContain('v1');
+    // whole-phrase substring would NOT have matched
+  });
+
+  test('excludes videos in a channel the parent blocked (whitelisted = 0)', () => {
+    seedProfile(db, { id: 5 });
+    wl('chBlocked', 5, 'Blocked Chan', 0);
+    seedVideo(db, { video_id: 'v1', channel_id: 'chBlocked', channel_name: 'Blocked Chan', title: 'Dinosaurs' });
+    expect(db.searchApprovedVideos(5, 'Dinosaurs')).toHaveLength(0);
+  });
+
+  test('excludes per-profile video_block rules', () => {
+    seedProfile(db, { id: 5 });
+    seedVideo(db, { video_id: 'v1', channel_id: 'chX', channel_name: 'Chan', title: 'Dinosaurs' });
+    db.blockVideo(5, 'v1');
+    expect(db.searchApprovedVideos(5, 'Dinosaurs')).toHaveLength(0);
+  });
+
+  test('excludes non-approved videos', () => {
+    seedProfile(db, { id: 5 });
+    seedVideo(db, { video_id: 'v1', channel_id: 'chX', title: 'Pending Dino', status: 'pending' });
+    seedVideo(db, { video_id: 'v2', channel_id: 'chX', title: 'Rejected Dino', status: 'rejected' });
+    expect(db.searchApprovedVideos(5, 'Dino')).toHaveLength(0);
+  });
+
+  test('ranks whitelisted-channel hits ahead of the broader library', () => {
+    seedProfile(db, { id: 5 });
+    wl('chWL', 5, 'Whitelisted Chan', 1);
+    seedVideo(db, { video_id: 'vOther', channel_id: 'chOther', channel_name: 'Other', title: 'Robot Cars' });
+    seedVideo(db, { video_id: 'vWL', channel_id: 'chWL', channel_name: 'Whitelisted Chan', title: 'Robot Cars' });
+    const out = db.searchApprovedVideos(5, 'Robot Cars');
+    expect(out[0].video_id).toBe('vWL');
+  });
+});
