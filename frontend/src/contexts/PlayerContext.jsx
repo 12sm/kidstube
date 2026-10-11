@@ -5,18 +5,36 @@ const PlayerContext = createContext(null);
 
 const FALLBACK_NOTICE = "Oops! That video isn't ready yet. Let's watch something else!";
 
+// Videos a parent saved to this device for offline (Trip Mode) live in this
+// Cache Storage bucket. They were picked by a parent, so they may play when the
+// server can't be reached.
+const OFFLINE_CACHE = 'kt-offline-v1';
+async function isDownloaded(id) {
+  try {
+    if (typeof caches === 'undefined') return false;
+    const cache = await caches.open(OFFLINE_CACHE);
+    return !!(await cache.match(`/offline-media/${id}.mp4`));
+  } catch {
+    return false;
+  }
+}
+
 // Ask the backend whether this child may play this video. Search-found videos
 // are reviewed for the watching child first; anything that fails review, or
 // any error, comes back not playable (fail closed).
 async function checkPlayable(id, profileId) {
+  let r;
   try {
-    const r = await fetch(`/api/playable/${encodeURIComponent(id)}?profile_id=${encodeURIComponent(profileId || '')}`);
+    r = await fetch(`/api/playable/${encodeURIComponent(id)}?profile_id=${encodeURIComponent(profileId || '')}`);
+  } catch {
+    // Server unreachable: only parent-downloaded videos may play.
+    if (await isDownloaded(id)) return { playable: true };
+    return { playable: false, notice: FALLBACK_NOTICE, suggestion: null };
+  }
+  try {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
-  } catch (err) {
-    // With no connection at all, only parent-downloaded videos can play anyway
-    // (a YouTube embed can't load), so don't block those.
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return { playable: true };
+  } catch {
     return { playable: false, notice: FALLBACK_NOTICE, suggestion: null };
   }
 }
