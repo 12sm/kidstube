@@ -3,7 +3,7 @@
 
 const db = require('../src/db');
 const { runLlmCheck } = require('../src/llm');
-const { buildCombinedProfile } = require('../src/childProfile');
+const reviewGate = require('../src/reviewGate');
 
 db.migrate();
 const rawDb = db.getDb();
@@ -15,7 +15,7 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function runBatchA(childProfile) {
+async function runBatchA({ childProfile, age }) {
   console.log('\n=== BATCH A: Tag approved videos with no tags ===');
 
   const videos = rawDb.prepare(`
@@ -34,7 +34,7 @@ async function runBatchA(childProfile) {
   for (let i = 0; i < videos.length; i++) {
     const video = videos[i];
     try {
-      const result = await runLlmCheck(video, { childProfile });
+      const result = await runLlmCheck(video, { childProfile, age });
 
       if (result.approved) {
         if (result.tags && result.tags.length > 0) {
@@ -62,7 +62,7 @@ async function runBatchA(childProfile) {
   console.log(`Batch A complete: ${videos.length} processed, ${tagged} tagged, ${rejected} flipped to rejected, ${errors} errors`);
 }
 
-async function runBatchB(childProfile) {
+async function runBatchB({ childProfile, age }) {
   console.log('\n=== BATCH B: Re-evaluate soft-keyword rejected videos ===');
 
   const placeholders = SOFT_KEYWORDS.map(() => '?').join(', ');
@@ -83,7 +83,7 @@ async function runBatchB(childProfile) {
   for (let i = 0; i < pending.length; i++) {
     const video = pending[i];
     try {
-      const result = await runLlmCheck(video, { childProfile });
+      const result = await runLlmCheck(video, { childProfile, age });
 
       if (result.approved) {
         rawDb.prepare(`UPDATE videos SET status='approved', rejection_reason=NULL WHERE video_id=?`)
@@ -110,13 +110,18 @@ async function runBatchB(childProfile) {
 }
 
 async function main() {
-  const childProfile = buildCombinedProfile(db);
-  console.log('Child profile preview:', childProfile.slice(0, 150) + (childProfile.length > 150 ? '...' : ''));
+  // These batches flip a video's status for every child, so judge for the
+  // youngest child (fail safe). They used to send both profiles combined, or
+  // "ages 7-8" when none were set.
+  const youngest = reviewGate.resolveReviewProfile(db, reviewGate.youngestProfile(db)?.profileId || null);
+  const target = { childProfile: youngest.markdown, age: youngest.age };
+  const preview = youngest.markdown || '(no profile text — young-child fallback)';
+  console.log(`Judging for age ${youngest.age} (${youngest.source}):`, preview.slice(0, 150) + (preview.length > 150 ? '...' : ''));
 
   const batchArg = process.argv[2];
 
-  if (!batchArg || batchArg === 'a') await runBatchA(childProfile);
-  if (!batchArg || batchArg === 'b') await runBatchB(childProfile);
+  if (!batchArg || batchArg === 'a') await runBatchA(target);
+  if (!batchArg || batchArg === 'b') await runBatchB(target);
 
   console.log('\nDone.');
 }

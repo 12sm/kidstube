@@ -12,9 +12,10 @@ afterEach(() => teardownTestDb(db));
 const { buildCombinedProfile } = require('../src/childProfile');
 
 describe('buildCombinedProfile', () => {
-  test('returns generic fallback when no profiles exist', () => {
+  test('returns young-child fallback (never ages 7-8) when no profiles exist', () => {
     const result = buildCombinedProfile(db);
-    expect(result).toContain('ages 7-8');
+    expect(result).toContain('assume about 5 years old');
+    expect(result).not.toMatch(/7[-–]8/);
   });
 
   test('returns single profile markdown when only one exists', () => {
@@ -34,10 +35,11 @@ describe('buildCombinedProfile', () => {
     expect(result).toContain('Child2 loves animals.');
   });
 
-  test('returns generic fallback when profiles exist but markdown is empty', () => {
+  test('returns young-child fallback when profiles exist but markdown is empty', () => {
     db.saveChildProfile(5, '');
     db.saveChildProfile(6, '');
     const result = buildCombinedProfile(db);
-    expect(result).toContain('ages 7-8');
+    expect(result).toContain('assume about 5 years old');
+    expect(result).not.toMatch(/7[-–]8/);
   });
 });

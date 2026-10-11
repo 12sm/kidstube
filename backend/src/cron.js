@@ -5,6 +5,7 @@ const rss = require('./rss');
 const ytdlp = require('./ytdlp');
 const filter = require('./filter');
 const { runLlmCheck } = require('./llm');
+const reviewGate = require('./reviewGate');
 const { parseTopicCategories } = require('./youtube');
 const { runDailyInsightsPass, runWeeklyConsolidationPass } = require('./insights');
 const { scrapeWatchHistory } = require('./history-scraper');
@@ -122,30 +123,15 @@ async function runNightlyJob() {
       }
     }
 
-    // Step 6: LLM review of search-imported videos (needs_llm_review = 1)
-    const pendingReview = db.getDb().prepare(`
-      SELECT video_id, title, description, transcript, duration_seconds, channel_id
-      FROM videos WHERE status = 'approved' AND needs_llm_review = 1
-    `).all();
-
-    if (pendingReview.length > 0) {
-      console.log(`[Cron] LLM-reviewing ${pendingReview.length} search-imported videos`);
-      for (const video of pendingReview) {
-        try {
-          const result = await runLlmCheck(video, { childProfile: null });
-          if (result.approved) {
-            if (result.tags && result.tags.length > 0) db.insertVideoTags(video.video_id, result.tags);
-            db.getDb().prepare('UPDATE videos SET needs_llm_review = 0 WHERE video_id = ?').run(video.video_id);
-          } else {
-            db.updateVideoStatus(video.video_id, 'rejected', `LLM: ${result.reason || 'inappropriate content'}`);
-            db.getDb().prepare('UPDATE videos SET needs_llm_review = 0 WHERE video_id = ?').run(video.video_id);
-            stats.rejected++;
-          }
-        } catch (err) {
-          console.error(`[Cron] LLM review failed for ${video.video_id}:`, err.message);
-        }
-        await new Promise(r => setTimeout(r, 1200));
-      }
+    // Step 6: LLM review of search/enrichment-imported videos (needs_llm_review = 1),
+    // once per child against THAT child's profile (it used to pass childProfile: null,
+    // which judged everything for "ages 7–8"). Verdicts land in video_reviews and
+    // gate playback per child. A video rejected for every child is rejected
+    // outright; any LLM error leaves it pending (still gated) for the next run.
+    try {
+      await reviewPendingImports(stats);
+    } catch (err) {
+      console.error('[Cron] Pending-import review failed:', err.message);
     }
 
     db.finishCronRun(runId, stats);
@@ -159,6 +145,43 @@ async function runNightlyJob() {
     return { success: false, error: err.message };
   } finally {
     isRunning = false;
+  }
+}
+
+async function reviewPendingImports(stats, deps = {}) {
+  const _db = deps.db || db;
+  const _gate = deps.reviewGate || reviewGate;
+  const delayMs = deps.delayMs ?? 1200;
+  const review = deps.review; // test hook; defaults to the strict LLM review
+
+  const pending = _db.getDb().prepare(`
+    SELECT * FROM videos WHERE status = 'approved' AND needs_llm_review = 1
+  `).all();
+  if (pending.length === 0) return;
+
+  const profiles = _db.getProfiles();
+  console.log(`[Cron] LLM-reviewing ${pending.length} search-imported videos for ${profiles.length} profile(s)`);
+  for (const video of pending) {
+    const results = [];
+    for (const profile of profiles) {
+      results.push({
+        profileId: profile.id,
+        ...(await _gate.reviewForProfile(_db, video, profile.id, { timeoutMs: 30000, ...(review ? { review } : {}) })),
+      });
+    }
+    if (results.some(r => r.verdict === 'error')) {
+      // Leave needs_llm_review = 1 so it stays gated and is retried next run.
+      if (delayMs) await new Promise(r => setTimeout(r, delayMs));
+      continue;
+    }
+    if (results.length > 0 && results.every(r => r.verdict === 'rejected')) {
+      const youngest = _gate.youngestProfile(_db);
+      const pick = results.find(r => youngest && r.profileId === youngest.profileId) || results[0];
+      _db.updateVideoStatus(video.video_id, 'rejected', `LLM: ${pick.reason || 'inappropriate content'}`);
+      stats.rejected++;
+    }
+    _db.getDb().prepare('UPDATE videos SET needs_llm_review = 0 WHERE video_id = ?').run(video.video_id);
+    if (delayMs) await new Promise(r => setTimeout(r, delayMs));
   }
 }
 
@@ -269,15 +292,16 @@ async function processVideo(videoData, filterRules, stats, isRecommended, source
   if (llmState && llmState.calls < llmState.cap) {
     llmState.calls++;
 
-    // Load child profile if available (attached by runNightlyJob per profile)
-    const childProfileRow = videoData._profileId ? db.getChildProfile(videoData._profileId) : null;
-    const childProfile = childProfileRow?.markdown || null;
+    // Judge for the profile this video is being pulled for; with no profile (or
+    // an empty one) fall back to the youngest child, never an older default.
+    const who = reviewGate.resolveReviewProfile(db, videoData._profileId || null);
+    const childProfile = who.markdown;
 
     // Parse YouTube topicCategories if present
     const topicCategories = parseTopicCategories(enrichedVideo.topicCategories || []);
     const creatorTags = Array.isArray(enrichedVideo.tags) ? enrichedVideo.tags : [];
 
-    const llmResult = await runLlmCheck(enrichedVideo, { childProfile, topicCategories, creatorTags });
+    const llmResult = await runLlmCheck(enrichedVideo, { childProfile, age: who.age, topicCategories, creatorTags });
 
     if (!llmResult.approved) {
       db.updateVideoStatus(videoId, 'rejected', `LLM: ${llmResult.reason || 'inappropriate content'}`);
@@ -460,4 +484,4 @@ function scheduleJob() {
   });
 }
 
-module.exports = { runNightlyJob, scheduleJob, syncSubscriptions, backfillChannel, sourceEnrichmentTopics };
+module.exports = { runNightlyJob, scheduleJob, syncSubscriptions, backfillChannel, sourceEnrichmentTopics, reviewPendingImports };

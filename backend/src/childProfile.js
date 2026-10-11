@@ -2,6 +2,7 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('./db');
+const { FALLBACK_AUDIENCE } = require('./llm');
 
 /**
  * Generate an initial child profile markdown from guided interview answers.
@@ -94,7 +95,7 @@ async function refreshParentInterests(profileId, markdown) {
 
 /**
  * Build a combined child profile string for use as LLM context.
- * - 0 profiles with content → generic fallback
+ * - 0 profiles with content → young-child fallback (never an older default)
  * - 1 profile with content  → returns that profile's markdown directly
  * - 2 profiles with content → combines with ## Profile: <name> headers
  *
@@ -114,7 +115,7 @@ function buildCombinedProfile(dbModule) {
   }
 
   if (profiles.length === 0) {
-    return 'This content is for children ages 7-8. Approve only age-appropriate, educational or entertaining content.';
+    return `${FALLBACK_AUDIENCE} Approve only age-appropriate, educational or entertaining content.`;
   }
 
   if (profiles.length === 1) {

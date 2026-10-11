@@ -11,6 +11,7 @@ import History      from './pages/History.jsx';
 import Admin        from './pages/Admin.jsx';
 import Search       from './pages/Search.jsx';
 import MiniPlayer   from './components/MiniPlayer.jsx';
+import PlaybackGateNotice from './components/PlaybackGateNotice.jsx';
 import { PlayerProvider } from './contexts/PlayerContext.jsx';
 
 // Profile context — stores active profile in localStorage
@@ -78,6 +79,8 @@ export default function App() {
 
           {/* Persistent mini player — lives outside Routes so it survives navigation */}
           <MiniPlayer />
+          {/* Review gate: "checking" spinner, or the kid notice + suggested video */}
+          <PlaybackGateNotice />
         </BrowserRouter>
       </PlayerProvider>
     </ProfileContext.Provider>
