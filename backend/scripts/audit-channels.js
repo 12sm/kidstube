@@ -3,7 +3,7 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../src/db');
-const { buildCombinedProfile } = require('../src/childProfile');
+const reviewGate = require('../src/reviewGate');
 
 db.migrate();
 const rawDb = db.getDb();
@@ -100,13 +100,18 @@ async function main() {
   }
 
   const client = new Anthropic({ apiKey });
-  const childProfile = buildCombinedProfile(db);
-  console.log('Child profile preview:', childProfile.slice(0, 120) + '...');
 
   const profileArg = process.argv[2] ? parseInt(process.argv[2], 10) : null;
   const profilesToAudit = profileArg ? [profileArg] : PROFILE_IDS;
 
   for (let i = 0; i < profilesToAudit.length; i++) {
+    // Audit each child's channels against that child's own profile (youngest
+    // child's as a fallback), not both profiles mashed together.
+    const who = reviewGate.resolveReviewProfile(db, profilesToAudit[i]);
+    const childProfile = who.markdown
+      ? `The viewer is ${who.age} years old.\n\n${who.markdown}`
+      : `The viewer is a young child (assume about ${who.age} years old). Judge strictly for that age.`;
+    console.log(`Profile ${profilesToAudit[i]}: judging for age ${who.age} (${who.source})`);
     await auditProfile(client, profilesToAudit[i], childProfile);
     if (i < profilesToAudit.length - 1) await sleep(2000);
   }

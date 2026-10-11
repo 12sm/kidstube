@@ -23,6 +23,7 @@ const jobDryRun  = require('./jobDryRun');
 const dietMonitor = require('./dietMonitor');
 const feedComposer = require('./feedComposer');
 const feedC = require('./feedConstants');
+const reviewGate = require('./reviewGate');
 
 
 const crypto = require('crypto');
@@ -43,6 +44,7 @@ app.use(cookieParser());
 
 // Initialize database on startup
 db.migrate();
+reviewGate.ensureSchema(db);
 
 // Start cron scheduler
 cron.scheduleJob();
@@ -198,7 +200,8 @@ app.get('/api/feed/:profileId', (req, res) => {
   });
 
   console.log(`[Feed] profile=${profileId} ratio=${enrichmentInfo.ratio.toFixed(2)} gaming=${enrichmentInfo.gamingFraction.toFixed(2)} window=${enrichmentInfo.windowSize}`);
-  res.json({ videos, limit, enrichment: enrichmentInfo });
+  // Hide search/enrichment videos the review gate already rejected for this child.
+  res.json({ videos: reviewGate.hideRejectedFor(db, profileId, videos), limit, enrichment: enrichmentInfo });
 });
 
 // Get approved videos for a specific channel
@@ -223,7 +226,7 @@ app.get('/api/related/:videoId', (req, res) => {
 
   if (profileId) {
     const videos = recommendations.getRecommendedVideos(db, videoId, profileId);
-    return res.json({ videos });
+    return res.json({ videos: reviewGate.hideRejectedFor(db, profileId, videos) });
   }
 
   // Fallback: no profile context — use legacy related query
@@ -244,6 +247,32 @@ app.get('/api/video/:videoId', (req, res) => {
   const video = db.getVideoById(videoId);
   if (!video) return res.status(404).json({ error: 'Video not found' });
   res.json({ video });
+});
+
+// Review gate: may this child play this video? Search/enrichment videos are
+// reviewed by the LLM for the watching child before they can play (cached per
+// video + child). Anything that fails review, or any review error/timeout, is
+// not playable, and the kid gets a friendly notice plus an approved suggestion.
+app.get('/api/playable/:videoId', async (req, res) => {
+  const { videoId } = req.params;
+  const profileId = parseInt(req.query.profile_id) || reviewGate.youngestProfile(db)?.profileId || null;
+  if (!profileId) {
+    return res.json({ playable: false, reason: 'no_profile', notice: reviewGate.KID_NOTICE, suggestion: null });
+  }
+  let result;
+  try {
+    result = await reviewGate.checkPlayable(db, videoId, profileId);
+  } catch (err) {
+    console.error(`[Playable] gate check failed for ${videoId}:`, err.message);
+    result = { playable: false, reason: 'review_failed' };
+  }
+  if (result.playable) return res.json({ playable: true });
+
+  let suggestion = null;
+  try { suggestion = reviewGate.findSuggestion(db, videoId, profileId); } catch (err) {
+    console.error(`[Playable] suggestion failed for ${videoId}:`, err.message);
+  }
+  res.json({ playable: false, reason: result.reason, notice: reviewGate.KID_NOTICE, suggestion });
 });
 
 // Get a stream URL for a video (used by Roku channel)
@@ -272,6 +301,14 @@ app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   console.log(`[stream] Request for ${videoId}`);
   if (!/^[a-zA-Z0-9_-]{6,15}$/.test(videoId)) return res.status(400).json({ error: 'Invalid video ID' });
+
+  // Same review gate as the web player. Roku sends no profile, so judge for the
+  // youngest child.
+  const gateProfileId = parseInt(req.query.profile_id) || reviewGate.youngestProfile(db)?.profileId || null;
+  const gate = gateProfileId
+    ? await reviewGate.checkPlayable(db, videoId, gateProfileId).catch(() => ({ playable: false }))
+    : { playable: false };
+  if (!gate.playable) return res.status(403).json({ error: 'Video not available', reason: gate.reason || 'review_failed' });
 
   const cached = streamCache.get(videoId);
   if (cached && cached.expiresAt > Date.now()) {
@@ -513,6 +550,7 @@ app.get('/api/search', async (req, res) => {
     : await youtube.searchVideos(q, { open: true, maxResults: 20 });
 
   for (const video of apiVideos) {
+    if (!video.video_id) continue; // channel/playlist results have no video id
     // Already in the DB from a prior search/pipeline run: re-surface it if it
     // was approved, otherwise respect its existing status (rejected/pending).
     // Previously this `continue`d unconditionally, so repeat ("saved") searches
@@ -528,6 +566,8 @@ app.get('/api/search', async (req, res) => {
     const filterResult = filter.runFilterPass(video, filterRules);
     if (filterResult.rejected) continue;
 
+    // Stored as approved + needs_llm_review so the nightly run reviews it for
+    // every child; it can't play for anyone until the gate approves it for them.
     db.insertVideo({
       ...video,
       transcript:       null,
@@ -549,7 +589,19 @@ app.get('/api/search', async (req, res) => {
     ...apiResults.filter(v => !seen.has(v.video_id)),
   ];
 
-  res.json({ results: merged });
+  // Review gate: open-YouTube results are reviewed now, for THIS child, before
+  // they're shown. Rejected results and results whose review errored are
+  // dropped (fail closed). Anything past the per-search budget stays listed
+  // but is still reviewed before it can play (/api/playable).
+  let gated;
+  try {
+    gated = await reviewGate.gateSearchResults(db, profileId, merged);
+  } catch (err) {
+    console.error('[Search] review gate failed, returning only parent-approved results:', err.message);
+    gated = merged.filter(v => !reviewGate.isGated(db.getVideoById(v.video_id)));
+  }
+
+  res.json({ results: gated });
 });
 
 // Voice-to-intent: convert natural speech to search keywords
